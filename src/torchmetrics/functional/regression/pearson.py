@@ -1,4 +1,4 @@
-# Copyright The PyTorch Lightning team.
+# Copyright The Lightning team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,12 +11,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Tuple
+import math
 
 import torch
 from torch import Tensor
 
 from torchmetrics.functional.regression.utils import _check_data_shape_to_num_outputs
+from torchmetrics.utilities import rank_zero_warn
 from torchmetrics.utilities.checks import _check_same_shape
 
 
@@ -28,36 +29,51 @@ def _pearson_corrcoef_update(
     var_x: Tensor,
     var_y: Tensor,
     corr_xy: Tensor,
-    n_prior: Tensor,
+    num_prior: Tensor,
     num_outputs: int,
-) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
-    """Updates and returns variables required to compute Pearson Correlation Coefficient.
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+    """Update and returns variables required to compute Pearson Correlation Coefficient.
 
-    Checks for same shape of input tensors.
+    Check for same shape of input tensors.
 
     Args:
+        preds: estimated scores
+        target: ground truth scores
         mean_x: current mean estimate of x tensor
         mean_y: current mean estimate of y tensor
         var_x: current variance estimate of x tensor
         var_y: current variance estimate of y tensor
         corr_xy: current covariance estimate between x and y tensor
-        n_prior: current number of observed observations
+        num_prior: current number of observed observations
+        num_outputs: Number of outputs in multioutput setting
+
     """
     # Data checking
     _check_same_shape(preds, target)
     _check_data_shape_to_num_outputs(preds, target, num_outputs)
+    num_obs = preds.shape[0]
+    cond = num_prior.mean() > 0 or num_obs == 1
 
-    n_obs = preds.shape[0]
-    mx_new = (n_prior * mean_x + preds.mean(0) * n_obs) / (n_prior + n_obs)
-    my_new = (n_prior * mean_y + target.mean(0) * n_obs) / (n_prior + n_obs)
-    n_prior += n_obs
-    var_x += ((preds - mx_new) * (preds - mean_x)).sum(0)
-    var_y += ((target - my_new) * (target - mean_y)).sum(0)
+    if cond:
+        mx_new = (num_prior * mean_x + preds.sum(0)) / (num_prior + num_obs)
+        my_new = (num_prior * mean_y + target.sum(0)) / (num_prior + num_obs)
+    else:
+        mx_new = preds.mean(0).to(mean_x.dtype)
+        my_new = target.mean(0).to(mean_y.dtype)
+
+    num_prior += num_obs
+
+    if cond:
+        var_x += ((preds - mx_new) * (preds - mean_x)).sum(0)
+        var_y += ((target - my_new) * (target - mean_y)).sum(0)
+    else:
+        var_x += preds.var(0) * (num_obs - 1)
+        var_y += target.var(0) * (num_obs - 1)
     corr_xy += ((preds - mx_new) * (target - mean_y)).sum(0)
     mean_x = mx_new
     mean_y = my_new
 
-    return mean_x, mean_y, var_x, var_y, corr_xy, n_prior
+    return mean_x, mean_y, var_x, var_y, corr_xy, num_prior
 
 
 def _pearson_corrcoef_compute(
@@ -66,41 +82,59 @@ def _pearson_corrcoef_compute(
     corr_xy: Tensor,
     nb: Tensor,
 ) -> Tensor:
-    """Computes the final pearson correlation based on accumulated statistics.
+    """Compute the final pearson correlation based on accumulated statistics.
 
     Args:
         var_x: variance estimate of x tensor
         var_y: variance estimate of y tensor
         corr_xy: covariance estimate between x and y tensor
         nb: number of observations
+
     """
-    var_x /= nb - 1
-    var_y /= nb - 1
-    corr_xy /= nb - 1
+    # prevent overwrite the inputs
+    var_x = var_x / (nb - 1)
+    var_y = var_y / (nb - 1)
+    corr_xy = corr_xy / (nb - 1)
+    # if var_x, var_y is float16 and on cpu, make it bfloat16 as sqrt is not supported for float16
+    # on cpu, remove this after https://github.com/pytorch/pytorch/issues/54774 is fixed
+    if var_x.dtype == torch.float16 and var_x.device == torch.device("cpu"):
+        var_x = var_x.bfloat16()
+        var_y = var_y.bfloat16()
+
+    bound = math.sqrt(torch.finfo(var_x.dtype).eps)
+    if (var_x < bound).any() or (var_y < bound).any():
+        rank_zero_warn(
+            "The variance of predictions or target is close to zero. This can cause instability in Pearson correlation"
+            "coefficient, leading to wrong results. Consider re-scaling the input if possible or computing using a"
+            f"larger dtype (currently using {var_x.dtype}).",
+            UserWarning,
+        )
+
     corrcoef = (corr_xy / (var_x * var_y).sqrt()).squeeze()
     return torch.clamp(corrcoef, -1.0, 1.0)
 
 
 def pearson_corrcoef(preds: Tensor, target: Tensor) -> Tensor:
-    """Computes pearson correlation coefficient.
+    """Compute pearson correlation coefficient.
 
     Args:
         preds: estimated scores
         target: ground truth scores
 
     Example (single output regression):
-        >>> from torchmetrics.functional import pearson_corrcoef
+        >>> from torchmetrics.functional.regression import pearson_corrcoef
         >>> target = torch.tensor([3, -0.5, 2, 7])
         >>> preds = torch.tensor([2.5, 0.0, 2, 8])
         >>> pearson_corrcoef(preds, target)
         tensor(0.9849)
 
     Example (multi output regression):
-        >>> from torchmetrics.functional import pearson_corrcoef
+        >>> from torchmetrics.functional.regression import pearson_corrcoef
         >>> target = torch.tensor([[3, -0.5], [2, 7]])
         >>> preds = torch.tensor([[2.5, 0.0], [2, 8]])
         >>> pearson_corrcoef(preds, target)
         tensor([1., 1.])
+
     """
     d = preds.shape[1] if preds.ndim == 2 else 1
     _temp = torch.zeros(d, dtype=preds.dtype, device=preds.device)

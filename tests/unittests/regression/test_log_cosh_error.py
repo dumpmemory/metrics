@@ -1,4 +1,4 @@
-# Copyright The PyTorch Lightning team.
+# Copyright The Lightning team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,8 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
-from collections import namedtuple
 from functools import partial
 
 import numpy as np
@@ -21,27 +19,27 @@ import torch
 
 from torchmetrics.functional.regression.log_cosh import log_cosh_error
 from torchmetrics.regression.log_cosh import LogCoshError
-from unittests.helpers import seed_all
-from unittests.helpers.testers import BATCH_SIZE, NUM_BATCHES, MetricTester
+from unittests import BATCH_SIZE, NUM_BATCHES, _Input
+from unittests._helpers import seed_all
+from unittests._helpers.testers import MetricTester
 
 seed_all(42)
 
-num_targets = 5
+NUM_TARGETS = 5
 
-Input = namedtuple("Input", ["preds", "target"])
 
-_single_target_inputs = Input(
+_single_target_inputs = _Input(
     preds=torch.rand(NUM_BATCHES, BATCH_SIZE),
     target=torch.rand(NUM_BATCHES, BATCH_SIZE),
 )
 
-_multi_target_inputs = Input(
-    preds=torch.rand(NUM_BATCHES, BATCH_SIZE, num_targets),
-    target=torch.rand(NUM_BATCHES, BATCH_SIZE, num_targets),
+_multi_target_inputs = _Input(
+    preds=torch.rand(NUM_BATCHES, BATCH_SIZE, NUM_TARGETS),
+    target=torch.rand(NUM_BATCHES, BATCH_SIZE, NUM_TARGETS),
 )
 
 
-def sk_log_cosh_error(preds, target):
+def _reference_log_cosh_error(preds, target):
     preds, target = preds.numpy(), target.numpy()
     diff = preds - target
     if diff.ndim == 1:
@@ -57,31 +55,33 @@ def sk_log_cosh_error(preds, target):
     ],
 )
 class TestLogCoshError(MetricTester):
-    @pytest.mark.parametrize("ddp", [True, False])
-    @pytest.mark.parametrize("dist_sync_on_step", [True, False])
-    def test_log_cosh_error_class(self, ddp, dist_sync_on_step, preds, target):
-        num_outputs = 1 if preds.ndim == 2 else num_targets
-        print(preds.shape)
+    """Test class for `LogCoshError` metric."""
+
+    @pytest.mark.parametrize("ddp", [pytest.param(True, marks=pytest.mark.DDP), False])
+    def test_log_cosh_error_class(self, ddp, preds, target):
+        """Test class implementation of metric."""
+        num_outputs = 1 if preds.ndim == 2 else NUM_TARGETS
         self.run_class_metric_test(
             ddp=ddp,
-            dist_sync_on_step=dist_sync_on_step,
             preds=preds,
             target=target,
             metric_class=LogCoshError,
-            sk_metric=sk_log_cosh_error,
+            reference_metric=_reference_log_cosh_error,
             metric_args={"num_outputs": num_outputs},
         )
 
     def test_log_cosh_error_functional(self, preds, target):
+        """Test functional implementation of metric."""
         self.run_functional_metric_test(
             preds=preds,
             target=target,
             metric_functional=log_cosh_error,
-            sk_metric=sk_log_cosh_error,
+            reference_metric=_reference_log_cosh_error,
         )
 
     def test_log_cosh_error_differentiability(self, preds, target):
-        num_outputs = 1 if preds.ndim == 2 else num_targets
+        """Test the differentiability of the metric, according to its `is_differentiable` attribute."""
+        num_outputs = 1 if preds.ndim == 2 else NUM_TARGETS
         self.run_differentiability_test(
             preds=preds,
             target=target,

@@ -1,4 +1,4 @@
-# Copyright The PyTorch Lightning team.
+# Copyright The Lightning team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ import torch
 from torch import Tensor
 
 from torchmetrics.functional.classification.stat_scores import _reduce_stat_scores, _stat_scores_update
+from torchmetrics.utilities import rank_zero_warn
 from torchmetrics.utilities.checks import _input_squeeze
 from torchmetrics.utilities.enums import AverageMethod, MDMCAverageMethod
 
@@ -29,7 +30,7 @@ def _dice_compute(
     mdmc_average: Optional[str],
     zero_division: int = 0,
 ) -> Tensor:
-    """Computes dice from the stat scores: true positives, false positives, false negatives.
+    """Compute dice from the stat scores: true positives, false positives, false negatives.
 
     Args:
         tp: True positives
@@ -38,6 +39,7 @@ def _dice_compute(
         average: Defines the reduction that is applied
         mdmc_average: Defines how averaging is done for multi-dimensional multi-class inputs (on top of the
             ``average`` parameter)
+        zero_division: The value to use for the score if denominator equals zero.
     """
     numerator = 2 * tp
     denominator = 2 * tp + fp + fn
@@ -49,9 +51,9 @@ def _dice_compute(
 
     if average == AverageMethod.NONE and mdmc_average != MDMCAverageMethod.SAMPLEWISE:
         # a class is not present if there exists no TPs, no FPs, and no FNs
-        meaningless_indeces = torch.nonzero((tp | fn | fp) == 0).cpu()
-        numerator[meaningless_indeces, ...] = -1
-        denominator[meaningless_indeces, ...] = -1
+        meaningless_indices = torch.nonzero((tp | fn | fp) == 0).cpu()
+        numerator[meaningless_indices, ...] = -1
+        denominator[meaningless_indices, ...] = -1
 
     return _reduce_stat_scores(
         numerator=numerator,
@@ -75,7 +77,7 @@ def dice(
     multiclass: Optional[bool] = None,
     ignore_index: Optional[int] = None,
 ) -> Tensor:
-    r"""Computes `Dice`_:
+    r"""Compute `Dice`_.
 
     .. math:: \text{Dice} = \frac{\text{2 * TP}}{\text{2 * TP} + \text{FP} + \text{FN}}
 
@@ -105,10 +107,12 @@ def dice(
             - ``'samples'``: Calculate the metric for each sample, and average the metrics
               across samples (with equal weights for each sample).
 
-            .. note:: What is considered a sample in the multi-dimensional multi-class case
+            .. tip::
+                What is considered a sample in the multi-dimensional multi-class case
                 depends on the value of ``mdmc_average``.
 
-            .. note:: If ``'none'`` and a given class doesn't occur in the ``preds`` or ``target``,
+            .. hint::
+                If ``'none'`` and a given class doesn't occur in the ``preds`` or ``target``,
                 the value for the class will be ``nan``.
 
         mdmc_average:
@@ -149,6 +153,12 @@ def dice(
             Used only in certain special cases, where you want to treat inputs as a different type
             than what they appear to be.
 
+    .. warning::
+        The ``dice`` metrics is being deprecated from the classification subpackage in v1.6.0 of torchmetrics and will
+        be removed in v1.7.0. Please instead consider using ``f1score`` metric from the classification subpackage as it
+        provides the same functionality. Additionally, we are going to re-add the ``dice`` metric in the segmentation
+        domain in v1.6.0 with slight modifications to functionality.
+
     Return:
         The shape of the returned tensor depends on the ``average`` parameter
 
@@ -166,12 +176,21 @@ def dice(
             If ``num_classes`` is set and ``ignore_index`` is not in the range ``[0, num_classes)``.
 
     Example:
-        >>> from torchmetrics.functional import dice
+        >>> from torchmetrics.functional.classification import dice
         >>> preds = torch.tensor([2, 0, 2, 1])
         >>> target = torch.tensor([1, 1, 2, 0])
         >>> dice(preds, target, average='micro')
         tensor(0.2500)
+
     """
+    rank_zero_warn(
+        "The `dice` metrics is being deprecated from the classification subpackage in v1.6.0 of torchmetrics and will"
+        " removed in v1.7.0. Please instead consider using `f1score` metric from the classification subpackage as it"
+        " provides the same functionality. Additionally, we are going to re-add the `dice` metric in the segmentation"
+        " domain in v1.6.0 with slight modifications to functionality.",
+        DeprecationWarning,
+    )
+
     allowed_average = ("micro", "macro", "weighted", "samples", "none", None)
     if average not in allowed_average:
         raise ValueError(f"The `average` has to be one of {allowed_average}, got {average}.")

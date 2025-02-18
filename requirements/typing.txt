@@ -1,0 +1,11 @@
+mypy ==1.15.0
+torch ==2.5.1
+
+types-PyYAML
+types-emoji
+types-protobuf
+types-requests
+types-setuptools
+types-six
+types-tabulate
+types-protobuf

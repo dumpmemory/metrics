@@ -1,12 +1,15 @@
-name: CI integrations
+name: "CI integrations | CPU"
 
 # see: https://help.github.com/en/actions/reference/events-that-trigger-workflows
-on:  # Trigger the workflow on push or pull request, but only for the master branch
+on: # Trigger the workflow on push or pull request, but only for the master branch
   push:
     branches: [master, "release/*"]
   pull_request:
     branches: [master, "release/*"]
     types: [opened, reopened, ready_for_review, synchronize]
+  schedule:
+    # At the end of every day
+    - cron: "0 0 * * *"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.head_ref }}
@@ -17,63 +20,65 @@ defaults:
     shell: bash
 
 jobs:
-
   pytest:
     runs-on: ${{ matrix.os }}
     if: github.event.pull_request.draft == false
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-20.04, macOS-11, windows-2022]
-        python-version: ['3.7', '3.10']
-        requires: ['oldest', 'latest']
+        os: ["ubuntu-22.04", "macOS-13", "windows-2022"]
+        python-version: ["3.9", "3.11"]
+        requires: ["oldest", "latest"]
         exclude:
-          - {python-version: '3.7', requires: 'latest'}
-          - {python-version: '3.10', requires: 'oldest'}
-          - {python-version: '3.10', os: 'windows'}  # todo: https://discuss.pytorch.org/t/numpy-is-not-available-error/146192
+          - { python-version: "3.10", requires: "oldest" }
+          - { python-version: "3.10", os: "windows" } # todo: https://discuss.pytorch.org/t/numpy-is-not-available-error/146192
         include:
-          - {python-version: '3.10', requires: 'latest', os: 'ubuntu-22.04'}
-          - {python-version: '3.10', requires: 'latest', os: 'macOS-12'}
+          - { python-version: "3.10", requires: "latest", os: "ubuntu-22.04" }
+          # - { python-version: "3.10", requires: "latest", os: "macOS-14" } # M1 machine # todo: crashing for MPS out of memory
     env:
-      PYTEST_ARTEFACT: test-results-${{ matrix.os }}-py${{ matrix.python-version }}-${{ matrix.requires }}.xml
-      PYTORCH_URL: https://download.pytorch.org/whl/cpu/torch_stable.html
+      PYTORCH_URL: "https://download.pytorch.org/whl/cpu/"
+      FREEZE_REQUIREMENTS: ${{ ! (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/release/')) }}
+      PYPI_CACHE: "_ci-cache_PyPI"
 
     # Timeout: https://stackoverflow.com/a/59076067/4521646
     # seems that MacOS jobs take much more than orger OS
     timeout-minutes: 45
 
     steps:
-    - uses: actions/checkout@v3
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ matrix.python-version }}
+      - uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
 
-    - name: full chashing
-      uses: ./.github/actions/caching
-      with:
-        os: ${{ runner.os }}
-        requires: ${{ matrix.requires }}
-        python-version: ${{ matrix.python-version }}
-        offset: "integrate"
+      - name: source cashing
+        uses: ./.github/actions/pull-caches
+        with:
+          requires: ${{ matrix.requires }}
+      - name: set oldest if/only for integrations
+        if: matrix.requires == 'oldest'
+        run: python .github/assistant.py set-oldest-versions --req_files='["requirements/_integrate.txt"]'
 
-    - name: Freeze PIL (hotfix)
-      # import of PILLOW_VERSION which they recently removed in v9.0 in favor of __version__
-      run: pip install "Pillow<9.0"  # It messes with torchvision
+      - name: Install all dependencies
+        run: |
+          # this was updated in `source cashing` by optional oldest
+          cat requirements/_integrate.txt
+          # to have install pyTorch
+          pip install -e . "setuptools==69.5.1" --extra-index-url=${PYTORCH_URL}
 
-    - name: Install all dependencies
-      run: |
-        set -e
-        pip install -r requirements/test.txt
-        pip install -r requirements/integrate.txt --find-links $PYTORCH_URL --upgrade-strategy eager
-        python ./requirements/adjust-versions.py requirements.txt
-        python ./requirements/adjust-versions.py requirements/image.txt
-        cat requirements.txt
-        pip install -e . --find-links $PYTORCH_URL
-        pip list
+          # adjust version to PT ecosystem based on installed TM
+          python -m wget https://raw.githubusercontent.com/Lightning-AI/utilities/main/scripts/adjust-torch-versions.py
+          python adjust-torch-versions.py requirements/base.txt
+          python adjust-torch-versions.py requirements/image.txt
 
-    - name: Integrations
-      working-directory: ./tests
-      env:
-        PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: 'python'
-      run: python -m pytest integrations -v --durations=25 --reruns 3 --reruns-delay 2
+          # install package and dependencies
+          pip install -e . -r requirements/_tests.txt -r requirements/_integrate.txt \
+            --extra-index-url="${PYTORCH_URL}" --find-links="${PYPI_CACHE}" \
+            --upgrade-strategy eager
+          pip list
+
+      - name: Integrations
+        working-directory: ./tests
+        env:
+          PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: "python"
+        run: python -m pytest integrations -v --durations=25 --reruns 3 --reruns-delay 2

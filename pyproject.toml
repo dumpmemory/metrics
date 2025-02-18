@@ -1,31 +1,157 @@
 [build-system]
 requires = [
-    "setuptools",
-    "wheel",
+  "setuptools",
+  "wheel",
 ]
 
-[tool.black]
-# https://github.com/psf/black
+[tool.ruff]
+target-version = "py39"
 line-length = 120
-exclude = "(.eggs|.git|.hg|.mypy_cache|.venv|_build|buck-out|build|dist)"
 
-[tool.isort]
-known_first_party = [
-    "torchmetrics",
-    "integrations",
-    "unittests",
-    "integrations",
+#[tool.ruff.pycodestyle]
+#ignore-overlong-task-comments = true
+format.preview = true
+lint.select = [
+  "D",  # see: https://pypi.org/project/pydocstyle
+  "E",
+  "F",  # see: https://pypi.org/project/pyflakes
+  "I",  #see: https://pypi.org/project/isort/
+  "N",  # see: https://pypi.org/project/pep8-naming
+  "S",  # see: https://pypi.org/project/flake8-bandit
+  "UP", # see: https://docs.astral.sh/ruff/rules/#pyupgrade-up
+  "W",  # see: https://pypi.org/project/pycodestyle
 ]
-skip_glob = []
-profile = "black"
-line_length = 120
+lint.extend-select = [
+  "A",    # see: https://pypi.org/project/flake8-builtins
+  "ANN",  # see: https://pypi.org/project/flake8-annotations
+  "B",    # see: https://pypi.org/project/flake8-bugbear
+  "C4",   # see: https://pypi.org/project/flake8-comprehensions
+  "EXE",  # see: https://pypi.org/project/flake8-executable
+  "ISC",  # see: https://pypi.org/project/flake8-implicit-str-concat
+  "PERF", # see: https://pypi.org/project/perflint/
+  "PIE",  # see: https://pypi.org/project/flake8-pie
+  "PLE",  # see: https://pypi.org/project/pylint/
+  "PT",   # see: https://pypi.org/project/flake8-pytest-style
+  "PYI",  # see: https://pypi.org/project/flake8-pyi/
+  "Q",    # see: https://pypi.org/project/flake8-quotes
+  "RET",  # see: https://pypi.org/project/flake8-return
+  "RUF",  # Ruff-specific rules
+  "SIM",  # see: https://pypi.org/project/flake8-simplify
+  "T10",  # see: https://pypi.org/project/flake8-debugger
+  "TID",  # see: https://pypi.org/project/flake8-tidy-imports/
+  "YTT",  # see: https://pypi.org/project/flake8-2020
+]
+lint.ignore = [
+  "ANN101", # Missing type annotation for `self` in method
+  "D100",   # todo: Missing docstring in public module
+  "D104",   # todo: Missing docstring in public package
+  "D107",   # Missing docstring in `__init__`
+  "E731",   # Do not assign a lambda expression, use a def
+  "EXE002", # The file is executable but no shebang is present
+  "ISC001", # potehtional comflict, flagged by Ruff itsel
+]
+lint.per-file-ignores."docs/source/conf.py" = [
+  "A001",
+  "D103",
+]
+lint.per-file-ignores."examples/*" = [
+  "ANN",  # any annotaions
+  "D205", # 1 blank line required between summary line and description
+  "D212", # [*] Multi-line docstring summary should start at the first line
+  "D415", # First line should end with a period, question mark, or exclamation point
+  "E501", # Line too long (XXX > 120)
+]
+lint.per-file-ignores."setup.py" = [
+  "ANN202",
+  "ANN401",
+]
+lint.per-file-ignores."src/**" = [
+  "ANN401",
+  "S310",   # todo: Audit URL open for permitted schemes. Allowing use of `file:` or custom schemes is often unexpected.
+  "UP006",  # todo: Use `list` instead of `List` for type annotation
+  "UP035",  # todo: `typing.List` is deprecated, use `list` instead
+]
+lint.per-file-ignores."tests/**" = [
+  "ANN001",
+  "ANN201",
+  "ANN202",
+  "ANN401",
+  "S101",
+  "S301",   # todo: `pickle` and modules that wrap it can be unsafe when used to deserialize untrusted data, possible security issue
+]
+# Unlike Flake8, default to a complexity level of 10.
+lint.mccabe.max-complexity = 10
+# Use Google-style docstrings.
+lint.pydocstyle.convention = "google"
 
-[tool.autopep8]
-ignore = ["E731"]
+[tool.codespell]
+#skip = '*.py'
+quiet-level = 3
+# Todo: comma separated list of words; waiting for:
+#  https://github.com/codespell-project/codespell/issues/2839#issuecomment-1731601603
+# Todo: also adding links until they ignored by its: nature
+#  https://github.com/codespell-project/codespell/issues/2243#issuecomment-1732019960
+ignore-words-list = """
+  rouge, \
+  mape, \
+  wil, \
+  fpr, \
+  raison, \
+  archiv
+"""
+
+[tool.docformatter]
+recursive = true
+# some docstring start with r"""
+wrap-summaries = 119
+wrap-descriptions = 120
+blank = true
+
+[tool.check-manifest]
+ignore = [
+  "*.yml",
+  ".github",
+  ".github/*",
+]
+
+[tool.pytest.ini_options]
+norecursedirs = [
+  ".git",
+  ".github",
+  "dist",
+  "build",
+  "docs",
+]
+addopts = [
+  "--strict-markers",
+  "--doctest-modules",
+  "--doctest-plus",
+  "--color=yes",
+  "--disable-pytest-warnings",
+]
+markers = [
+  "DDP: mark a test as Distributed Data Parallel",
+]
+filterwarnings = [
+  "ignore::FutureWarning",
+  "default:::torchmetrics",
+]
+xfail_strict = true
+junit_duration_report = "call"
+
+[tool.coverage.report]
+exclude_lines = [
+  "pragma: no cover",
+  "pass",
+]
+[tool.coverage.run]
+parallel = true
+concurrency = "thread"
+relative_files = true
 
 [tool.mypy]
 files = [
-    "src/torchmetrics",
+  "src/torchmetrics",
 ]
 install_types = "True"
 non_interactive = "True"
@@ -41,77 +167,20 @@ disable_error_code = "attr-defined"
 # style choices
 warn_no_return = "False"
 
-# Ignore mypy errors for these files
-# TODO: the goal is for this to be empty
-[[tool.mypy.overrides]]
-# the list can be generated with:
-# mypy --no-error-summary 2>&1 | tr ':' ' ' | awk '{print $1}' | sort | uniq | sed 's/\.py//g; s|src/||g;  s|\/|\.|g' | xargs -I {} echo '"{}",'
-module = [
-    "torchmetrics.aggregation",
-    "torchmetrics.classification.accuracy",
-    "torchmetrics.classification.auroc",
-    "torchmetrics.classification.average_precision",
-    "torchmetrics.classification.binned_precision_recall",
-    "torchmetrics.classification.calibration_error",
-    "torchmetrics.classification.cohen_kappa",
-    "torchmetrics.classification.confusion_matrix",
-    "torchmetrics.classification.exact_match",
-    "torchmetrics.classification.f_beta",
-    "torchmetrics.classification.hamming",
-    "torchmetrics.classification.hinge",
-    "torchmetrics.classification.jaccard",
-    "torchmetrics.classification.matthews_corrcoef",
-    "torchmetrics.classification.precision_recall_curve",
-    "torchmetrics.classification.precision_recall",
-    "torchmetrics.classification.ranking",
-    "torchmetrics.classification.recall_at_fixed_precision",
-    "torchmetrics.classification.roc",
-    "torchmetrics.classification.specificity",
-    "torchmetrics.classification.stat_scores",
-    "torchmetrics.collections",
-    "torchmetrics.detection.mean_ap",
-    "torchmetrics.functional.audio.pit",
-    "torchmetrics.functional.classification.auroc",
-    "torchmetrics.functional.classification.average_precision",
-    "torchmetrics.functional.classification.calibration_error",
-    "torchmetrics.functional.classification.confusion_matrix",
-    "torchmetrics.functional.classification.f_beta",
-    "torchmetrics.functional.classification.precision_recall_curve",
-    "torchmetrics.functional.classification.ranking",
-    "torchmetrics.functional.classification.recall_at_fixed_precision",
-    "torchmetrics.functional.classification.roc",
-    "torchmetrics.functional.classification.stat_scores",
-    "torchmetrics.functional.image.helper",
-    "torchmetrics.functional.image.psnr",
-    "torchmetrics.functional.image.ssim",
-    "torchmetrics.functional.image.uqi",
-    "torchmetrics.functional.regression.cosine_similarity",
-    "torchmetrics.functional.regression.explained_variance",
-    "torchmetrics.functional.regression.kl_divergence",
-    "torchmetrics.functional.regression.r2",
-    "torchmetrics.functional.regression.wmape",
-    "torchmetrics.functional.retrieval.r_precision",
-    "torchmetrics.functional.text.squad",
-    "torchmetrics.image.fid",
-    "torchmetrics.image.inception",
-    "torchmetrics.image.lpip",
-    "torchmetrics.image.psnr",
-    "torchmetrics.image.ssim",
-    "torchmetrics.image.tv",
-    "torchmetrics.image.uqi",
-    "torchmetrics.metric",
-    "torchmetrics.regression.kl_divergence",
-    "torchmetrics.regression.log_mse",
-    "torchmetrics.regression.mae",
-    "torchmetrics.regression.mape",
-    "torchmetrics.regression.mse",
-    "torchmetrics.regression.symmetric_mape",
-    "torchmetrics.retrieval.precision_recall_curve",
-    "torchmetrics.text.cer",
-    "torchmetrics.text.mer",
-    "torchmetrics.text.wer",
-    "torchmetrics.utilities.checks",
-    "torchmetrics.utilities.data",
-    "torchmetrics.wrappers.tracker",
+[tool.typos.default]
+extend-ignore-identifiers-re = [
+  # *sigh* this just isn't worth the cost of fixing
+  "AttributeID.*Supress.*",
 ]
-ignore_errors = "True"
+
+[tool.typos.default.extend-identifiers]
+# *sigh* this just isn't worth the cost of fixing
+MAPE = "MAPE"
+WIL = "WIL"
+Raison = "Raison"
+
+[tool.typos.default.extend-words]
+# Don't correct the surname "Teh"
+fpr = "fpr"
+mape = "mape"
+wil = "wil"
