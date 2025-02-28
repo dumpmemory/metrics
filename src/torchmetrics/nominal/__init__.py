@@ -1,4 +1,4 @@
-# Copyright The PyTorch Lightning team.
+# Copyright The Lightning team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,7 +11,17 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from torchmetrics.nominal.cramers import CramersV  # noqa: F401
-from torchmetrics.nominal.pearson import PearsonsContingencyCoefficient  # noqa: F401
-from torchmetrics.nominal.theils_u import TheilsU  # noqa: F401
-from torchmetrics.nominal.tschuprows import TschuprowsT  # noqa: F401
+
+from torchmetrics.nominal.cramers import CramersV
+from torchmetrics.nominal.fleiss_kappa import FleissKappa
+from torchmetrics.nominal.pearson import PearsonsContingencyCoefficient
+from torchmetrics.nominal.theils_u import TheilsU
+from torchmetrics.nominal.tschuprows import TschuprowsT
+
+__all__ = [
+    "CramersV",
+    "FleissKappa",
+    "PearsonsContingencyCoefficient",
+    "TheilsU",
+    "TschuprowsT",
+]

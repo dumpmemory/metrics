@@ -1,4 +1,4 @@
-# Copyright The PyTorch Lightning team.
+# Copyright The Lightning team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,17 +17,17 @@
 import re
 import string
 from collections import Counter
-from typing import Any, Callable, Dict, List, Tuple, Union
+from typing import Any, Callable, Union
 
 from torch import Tensor, tensor
 
 from torchmetrics.utilities import rank_zero_warn
 
-SINGLE_PRED_TYPE = Dict[str, str]
-PREDS_TYPE = Union[SINGLE_PRED_TYPE, List[SINGLE_PRED_TYPE]]
-SINGLE_TARGET_TYPE = Dict[str, Union[str, Dict[str, Union[List[str], List[int]]]]]
-TARGETS_TYPE = Union[SINGLE_TARGET_TYPE, List[SINGLE_TARGET_TYPE]]
-UPDATE_METHOD_SINGLE_PRED_TYPE = Union[List[Dict[str, Union[str, int]]], str, Dict[str, Union[List[str], List[int]]]]
+SINGLE_PRED_TYPE = dict[str, str]
+PREDS_TYPE = Union[SINGLE_PRED_TYPE, list[SINGLE_PRED_TYPE]]
+SINGLE_TARGET_TYPE = dict[str, Union[str, dict[str, Union[list[str], list[int]]]]]
+TARGETS_TYPE = Union[SINGLE_TARGET_TYPE, list[SINGLE_TARGET_TYPE]]
+UPDATE_METHOD_SINGLE_PRED_TYPE = Union[list[dict[str, Union[str, int]]], str, dict[str, Union[list[str], list[int]]]]
 
 SQuAD_FORMAT = {
     "answers": {"answer_start": [1], "text": ["This is a test text"]},
@@ -57,7 +57,7 @@ def _normalize_text(s: str) -> str:
     return white_space_fix(remove_articles(remove_punc(lower(s))))
 
 
-def _get_tokens(s: str) -> List[str]:
+def _get_tokens(s: str) -> list[str]:
     """Split a sentence into separate tokens."""
     return [] if not s else _normalize_text(s).split()
 
@@ -75,8 +75,7 @@ def _compute_f1_score(predicted_answer: str, target_answer: str) -> Tensor:
         return tensor(0.0)
     precision = 1.0 * num_same / tensor(len(predicted_tokens))
     recall = 1.0 * num_same / tensor(len(target_tokens))
-    f1 = (2 * precision * recall) / (precision + recall)
-    return f1
+    return (2 * precision * recall) / (precision + recall)
 
 
 def _compute_exact_match_score(prediction: str, ground_truth: str) -> Tensor:
@@ -85,34 +84,33 @@ def _compute_exact_match_score(prediction: str, ground_truth: str) -> Tensor:
 
 
 def _metric_max_over_ground_truths(
-    metric_fn: Callable[[str, str], Tensor], prediction: str, ground_truths: List[str]
+    metric_fn: Callable[[str, str], Tensor], prediction: str, ground_truths: list[str]
 ) -> Tensor:
     """Calculate maximum score for a predicted answer with all reference answers."""
-    return max(metric_fn(prediction, truth) for truth in ground_truths)
+    return max(metric_fn(prediction, truth) for truth in ground_truths)  # type: ignore[type-var]
 
 
 def _squad_input_check(
     preds: PREDS_TYPE, targets: TARGETS_TYPE
-) -> Tuple[Dict[str, str], List[Dict[str, List[Dict[str, List[Dict[str, Any]]]]]]]:
+) -> tuple[dict[str, str], list[dict[str, list[dict[str, list[dict[str, Any]]]]]]]:
     """Check for types and convert the input to necessary format to compute the input."""
-
-    if isinstance(preds, Dict):
+    if isinstance(preds, dict):
         preds = [preds]
 
-    if isinstance(targets, Dict):
+    if isinstance(targets, dict):
         targets = [targets]
 
     for pred in preds:
-        keys = pred.keys()
-        if "prediction_text" not in keys or "id" not in keys:
+        pred_keys = pred.keys()
+        if "prediction_text" not in pred_keys or "id" not in pred_keys:
             raise KeyError(
                 "Expected keys in a single prediction are 'prediction_text' and 'id'."
                 "Please make sure that 'prediction_text' maps to the answer string and 'id' maps to the key string."
             )
 
     for target in targets:
-        keys = target.keys()
-        if "answers" not in keys or "id" not in keys:
+        target_keys = target.keys()
+        if "answers" not in target_keys or "id" not in target_keys:
             raise KeyError(
                 "Expected keys in a single target are 'answers' and 'id'."
                 "Please make sure that 'answers' maps to a `SQuAD` format dictionary and 'id' maps to the key string.\n"
@@ -120,8 +118,8 @@ def _squad_input_check(
                 f"{SQuAD_FORMAT}"
             )
 
-        answers: Dict[str, Union[List[str], List[int]]] = target["answers"]  # type: ignore
-        if "text" not in answers.keys():
+        answers: dict[str, Union[list[str], list[int]]] = target["answers"]  # type: ignore[assignment]
+        if "text" not in answers:
             raise KeyError(
                 "Expected keys in a 'answers' are 'text'."
                 "Please make sure that 'answer' maps to a `SQuAD` format dictionary.\n"
@@ -130,15 +128,15 @@ def _squad_input_check(
             )
 
     preds_dict = {prediction["id"]: prediction["prediction_text"] for prediction in preds}
-    _fn_answer = lambda tgt: dict(answers=[dict(text=txt) for txt in tgt["answers"]["text"]], id=tgt["id"])
+    _fn_answer = lambda tgt: {"answers": [{"text": txt} for txt in tgt["answers"]["text"]], "id": tgt["id"]}
     targets_dict = [{"paragraphs": [{"qas": [_fn_answer(target) for target in targets]}]}]
     return preds_dict, targets_dict
 
 
 def _squad_update(
-    preds: Dict[str, str],
-    target: List[Dict[str, List[Dict[str, List[Dict[str, Any]]]]]],
-) -> Tuple[Tensor, Tensor, Tensor]:
+    preds: dict[str, str],
+    target: list[dict[str, list[dict[str, list[dict[str, Any]]]]]],
+) -> tuple[Tensor, Tensor, Tensor]:
     """Compute F1 Score and Exact Match for a collection of predictions and references.
 
     Args:
@@ -162,6 +160,7 @@ def _squad_update(
         ... ]
         >>> _squad_update(preds_dict, targets_dict)
         (tensor(1.), tensor(1.), tensor(1))
+
     """
     f1 = tensor(0.0)
     exact_match = tensor(0.0)
@@ -173,7 +172,7 @@ def _squad_update(
                 if qa["id"] not in preds:
                     rank_zero_warn(f"Unanswered question {qa['id']} will receive score 0.")
                     continue
-                ground_truths = list(map(lambda x: x["text"], qa["answers"]))
+                ground_truths = [x["text"] for x in qa["answers"]]
                 pred = preds[qa["id"]]
                 exact_match += _metric_max_over_ground_truths(_compute_exact_match_score, pred, ground_truths)
                 f1 += _metric_max_over_ground_truths(_compute_f1_score, pred, ground_truths)
@@ -181,18 +180,19 @@ def _squad_update(
     return f1, exact_match, total
 
 
-def _squad_compute(f1: Tensor, exact_match: Tensor, total: Tensor) -> Dict[str, Tensor]:
+def _squad_compute(f1: Tensor, exact_match: Tensor, total: Tensor) -> dict[str, Tensor]:
     """Aggregate the F1 Score and Exact match for the batch.
 
     Return:
         Dictionary containing the F1 score, Exact match score for the batch.
+
     """
     exact_match = 100.0 * exact_match / total
     f1 = 100.0 * f1 / total
     return {"exact_match": exact_match, "f1": f1}
 
 
-def squad(preds: PREDS_TYPE, target: TARGETS_TYPE) -> Dict[str, Tensor]:
+def squad(preds: PREDS_TYPE, target: TARGETS_TYPE) -> dict[str, Tensor]:
     """Calculate `SQuAD Metric`_ .
 
     Args:
@@ -245,6 +245,7 @@ def squad(preds: PREDS_TYPE, target: TARGETS_TYPE) -> Dict[str, Tensor]:
     References:
         [1] SQuAD: 100,000+ Questions for Machine Comprehension of Text by Pranav Rajpurkar, Jian Zhang, Konstantin
         Lopyrev, Percy Liang `SQuAD Metric`_ .
+
     """
     preds_dict, target_dict = _squad_input_check(preds, target)
     f1, exact_match, total = _squad_update(preds_dict, target_dict)

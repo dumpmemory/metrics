@@ -1,4 +1,4 @@
-# Copyright The PyTorch Lightning team.
+# Copyright The Lightning team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,24 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from torchmetrics.classification.confusion_matrix import (  # isort:skip
-    BinaryConfusionMatrix,
-    ConfusionMatrix,
-    MulticlassConfusionMatrix,
-    MultilabelConfusionMatrix,
-)
-from torchmetrics.classification.precision_recall_curve import (  # isort:skip
-    PrecisionRecallCurve,
-    BinaryPrecisionRecallCurve,
-    MulticlassPrecisionRecallCurve,
-    MultilabelPrecisionRecallCurve,
-)
-from torchmetrics.classification.stat_scores import (  # isort:skip
-    BinaryStatScores,
-    MulticlassStatScores,
-    MultilabelStatScores,
-    StatScores,
-)
 from torchmetrics.classification.accuracy import Accuracy, BinaryAccuracy, MulticlassAccuracy, MultilabelAccuracy
 from torchmetrics.classification.auroc import AUROC, BinaryAUROC, MulticlassAUROC, MultilabelAUROC
 from torchmetrics.classification.average_precision import (
@@ -43,6 +25,12 @@ from torchmetrics.classification.calibration_error import (
     MulticlassCalibrationError,
 )
 from torchmetrics.classification.cohen_kappa import BinaryCohenKappa, CohenKappa, MulticlassCohenKappa
+from torchmetrics.classification.confusion_matrix import (
+    BinaryConfusionMatrix,
+    ConfusionMatrix,
+    MulticlassConfusionMatrix,
+    MultilabelConfusionMatrix,
+)
 from torchmetrics.classification.dice import Dice
 from torchmetrics.classification.exact_match import ExactMatch, MulticlassExactMatch, MultilabelExactMatch
 from torchmetrics.classification.f_beta import (
@@ -55,6 +43,7 @@ from torchmetrics.classification.f_beta import (
     MultilabelF1Score,
     MultilabelFBetaScore,
 )
+from torchmetrics.classification.group_fairness import BinaryFairness, BinaryGroupStatRates
 from torchmetrics.classification.hamming import (
     BinaryHammingDistance,
     HammingDistance,
@@ -68,11 +57,24 @@ from torchmetrics.classification.jaccard import (
     MulticlassJaccardIndex,
     MultilabelJaccardIndex,
 )
+from torchmetrics.classification.logauc import BinaryLogAUC, LogAUC, MulticlassLogAUC, MultilabelLogAUC
 from torchmetrics.classification.matthews_corrcoef import (
     BinaryMatthewsCorrCoef,
     MatthewsCorrCoef,
     MulticlassMatthewsCorrCoef,
     MultilabelMatthewsCorrCoef,
+)
+from torchmetrics.classification.negative_predictive_value import (
+    BinaryNegativePredictiveValue,
+    MulticlassNegativePredictiveValue,
+    MultilabelNegativePredictiveValue,
+    NegativePredictiveValue,
+)
+from torchmetrics.classification.precision_fixed_recall import (
+    BinaryPrecisionAtFixedRecall,
+    MulticlassPrecisionAtFixedRecall,
+    MultilabelPrecisionAtFixedRecall,
+    PrecisionAtFixedRecall,
 )
 from torchmetrics.classification.precision_recall import (
     BinaryPrecision,
@@ -84,108 +86,150 @@ from torchmetrics.classification.precision_recall import (
     Precision,
     Recall,
 )
+from torchmetrics.classification.precision_recall_curve import (
+    BinaryPrecisionRecallCurve,
+    MulticlassPrecisionRecallCurve,
+    MultilabelPrecisionRecallCurve,
+    PrecisionRecallCurve,
+)
 from torchmetrics.classification.ranking import (
     MultilabelCoverageError,
     MultilabelRankingAveragePrecision,
     MultilabelRankingLoss,
 )
-from torchmetrics.classification.recall_at_fixed_precision import (
+from torchmetrics.classification.recall_fixed_precision import (
     BinaryRecallAtFixedPrecision,
     MulticlassRecallAtFixedPrecision,
     MultilabelRecallAtFixedPrecision,
+    RecallAtFixedPrecision,
 )
 from torchmetrics.classification.roc import ROC, BinaryROC, MulticlassROC, MultilabelROC
+from torchmetrics.classification.sensitivity_specificity import (
+    BinarySensitivityAtSpecificity,
+    MulticlassSensitivityAtSpecificity,
+    MultilabelSensitivityAtSpecificity,
+    SensitivityAtSpecificity,
+)
 from torchmetrics.classification.specificity import (
     BinarySpecificity,
     MulticlassSpecificity,
     MultilabelSpecificity,
     Specificity,
 )
+from torchmetrics.classification.specificity_sensitivity import (
+    BinarySpecificityAtSensitivity,
+    MulticlassSpecificityAtSensitivity,
+    MultilabelSpecificityAtSensitivity,
+    SpecificityAtSensitivity,
+)
+from torchmetrics.classification.stat_scores import (
+    BinaryStatScores,
+    MulticlassStatScores,
+    MultilabelStatScores,
+    StatScores,
+)
 
 __all__ = [
-    "BinaryConfusionMatrix",
-    "ConfusionMatrix",
-    "MulticlassConfusionMatrix",
-    "MultilabelConfusionMatrix",
-    "PrecisionRecallCurve",
-    "BinaryPrecisionRecallCurve",
-    "MulticlassPrecisionRecallCurve",
-    "MultilabelPrecisionRecallCurve",
-    "BinaryStatScores",
-    "MulticlassStatScores",
-    "MultilabelStatScores",
-    "StatScores",
-    "Accuracy",
-    "BinaryAccuracy",
-    "MulticlassAccuracy",
-    "MultilabelAccuracy",
     "AUROC",
-    "BinaryAUROC",
-    "MulticlassAUROC",
-    "MultilabelAUROC",
+    "ROC",
+    "Accuracy",
     "AveragePrecision",
+    "BinaryAUROC",
+    "BinaryAccuracy",
     "BinaryAveragePrecision",
-    "MulticlassAveragePrecision",
-    "MultilabelAveragePrecision",
-    "BinnedAveragePrecision",
-    "BinnedPrecisionRecallCurve",
-    "BinnedRecallAtFixedPrecision",
     "BinaryCalibrationError",
-    "CalibrationError",
-    "MulticlassCalibrationError",
     "BinaryCohenKappa",
-    "CohenKappa",
-    "MulticlassCohenKappa",
-    "Dice",
-    "ExactMatch",
-    "MulticlassExactMatch",
-    "MultilabelExactMatch",
+    "BinaryConfusionMatrix",
     "BinaryF1Score",
     "BinaryFBetaScore",
+    "BinaryFairness",
+    "BinaryGroupStatRates",
+    "BinaryHammingDistance",
+    "BinaryHingeLoss",
+    "BinaryJaccardIndex",
+    "BinaryLogAUC",
+    "BinaryMatthewsCorrCoef",
+    "BinaryNegativePredictiveValue",
+    "BinaryPrecision",
+    "BinaryPrecisionAtFixedRecall",
+    "BinaryPrecisionRecallCurve",
+    "BinaryROC",
+    "BinaryRecall",
+    "BinaryRecallAtFixedPrecision",
+    "BinarySensitivityAtSpecificity",
+    "BinarySpecificity",
+    "BinarySpecificityAtSensitivity",
+    "BinaryStatScores",
+    "CalibrationError",
+    "CohenKappa",
+    "ConfusionMatrix",
+    "Dice",
+    "ExactMatch",
     "F1Score",
     "FBetaScore",
+    "HammingDistance",
+    "HingeLoss",
+    "JaccardIndex",
+    "LogAUC",
+    "MatthewsCorrCoef",
+    "MulticlassAUROC",
+    "MulticlassAccuracy",
+    "MulticlassAveragePrecision",
+    "MulticlassCalibrationError",
+    "MulticlassCohenKappa",
+    "MulticlassConfusionMatrix",
+    "MulticlassExactMatch",
     "MulticlassF1Score",
     "MulticlassFBetaScore",
+    "MulticlassHammingDistance",
+    "MulticlassHingeLoss",
+    "MulticlassJaccardIndex",
+    "MulticlassLogAUC",
+    "MulticlassMatthewsCorrCoef",
+    "MulticlassNegativePredictiveValue",
+    "MulticlassPrecision",
+    "MulticlassPrecisionAtFixedRecall",
+    "MulticlassPrecisionRecallCurve",
+    "MulticlassROC",
+    "MulticlassRecall",
+    "MulticlassRecallAtFixedPrecision",
+    "MulticlassSensitivityAtSpecificity",
+    "MulticlassSpecificity",
+    "MulticlassSpecificityAtSensitivity",
+    "MulticlassStatScores",
+    "MultilabelAUROC",
+    "MultilabelAccuracy",
+    "MultilabelAveragePrecision",
+    "MultilabelConfusionMatrix",
+    "MultilabelCoverageError",
+    "MultilabelExactMatch",
     "MultilabelF1Score",
     "MultilabelFBetaScore",
-    "BinaryHammingDistance",
-    "HammingDistance",
-    "MulticlassHammingDistance",
     "MultilabelHammingDistance",
-    "BinaryHingeLoss",
-    "HingeLoss",
-    "MulticlassHingeLoss",
-    "BinaryJaccardIndex",
-    "JaccardIndex",
-    "MulticlassJaccardIndex",
     "MultilabelJaccardIndex",
-    "BinaryMatthewsCorrCoef",
-    "MatthewsCorrCoef",
-    "MulticlassMatthewsCorrCoef",
+    "MultilabelLogAUC",
     "MultilabelMatthewsCorrCoef",
-    "BinaryPrecision",
-    "BinaryRecall",
-    "MulticlassPrecision",
-    "MulticlassRecall",
+    "MultilabelNegativePredictiveValue",
     "MultilabelPrecision",
-    "MultilabelRecall",
-    "Precision",
-    "Recall",
-    "CoverageError",
-    "LabelRankingAveragePrecision",
-    "LabelRankingLoss",
-    "MultilabelCoverageError",
+    "MultilabelPrecisionAtFixedRecall",
+    "MultilabelPrecisionRecallCurve",
+    "MultilabelROC",
     "MultilabelRankingAveragePrecision",
     "MultilabelRankingLoss",
-    "BinaryRecallAtFixedPrecision",
-    "MulticlassRecallAtFixedPrecision",
+    "MultilabelRecall",
     "MultilabelRecallAtFixedPrecision",
-    "ROC",
-    "BinaryROC",
-    "MulticlassROC",
-    "MultilabelROC",
-    "BinarySpecificity",
-    "MulticlassSpecificity",
+    "MultilabelSensitivityAtSpecificity",
     "MultilabelSpecificity",
+    "MultilabelSpecificityAtSensitivity",
+    "MultilabelStatScores",
+    "NegativePredictiveValue",
+    "Precision",
+    "PrecisionAtFixedRecall",
+    "PrecisionRecallCurve",
+    "Recall",
+    "RecallAtFixedPrecision",
+    "SensitivityAtSpecificity",
     "Specificity",
+    "SpecificityAtSensitivity",
+    "StatScores",
 ]
