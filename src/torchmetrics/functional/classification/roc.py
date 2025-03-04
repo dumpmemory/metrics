@@ -1,4 +1,4 @@
-# Copyright The PyTorch Lightning team.
+# Copyright The Lightning team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Union
 
 import torch
 from torch import Tensor
@@ -33,14 +33,15 @@ from torchmetrics.functional.classification.precision_recall_curve import (
     _multilabel_precision_recall_curve_update,
 )
 from torchmetrics.utilities import rank_zero_warn
-from torchmetrics.utilities.compute import _safe_divide
+from torchmetrics.utilities.compute import _safe_divide, interp
+from torchmetrics.utilities.enums import ClassificationTask
 
 
 def _binary_roc_compute(
-    state: Union[Tensor, Tuple[Tensor, Tensor]],
+    state: Union[Tensor, tuple[Tensor, Tensor]],
     thresholds: Optional[Tensor],
     pos_label: int = 1,
-) -> Tuple[Tensor, Tensor, Tensor]:
+) -> tuple[Tensor, Tensor, Tensor]:
     if isinstance(state, Tensor) and thresholds is not None:
         tps = state[:, 1, 1]
         fps = state[:, 0, 1]
@@ -48,13 +49,13 @@ def _binary_roc_compute(
         tns = state[:, 0, 0]
         tpr = _safe_divide(tps, tps + fns).flip(0)
         fpr = _safe_divide(fps, fps + tns).flip(0)
-        thresholds = thresholds.flip(0)
+        thres = thresholds.flip(0)
     else:
-        fps, tps, thresholds = _binary_clf_curve(preds=state[0], target=state[1], pos_label=pos_label)
+        fps, tps, thres = _binary_clf_curve(preds=state[0], target=state[1], pos_label=pos_label)
         # Add an extra threshold position to make sure that the curve starts at (0, 0)
         tps = torch.cat([torch.zeros(1, dtype=tps.dtype, device=tps.device), tps])
         fps = torch.cat([torch.zeros(1, dtype=fps.dtype, device=fps.device), fps])
-        thresholds = torch.cat([torch.ones(1, dtype=thresholds.dtype, device=thresholds.device), thresholds])
+        thres = torch.cat([torch.ones(1, dtype=thres.dtype, device=thres.device), thres])
 
         if fps[-1] <= 0:
             rank_zero_warn(
@@ -62,7 +63,7 @@ def _binary_roc_compute(
                 " Returning zero tensor in false positive score",
                 UserWarning,
             )
-            fpr = torch.zeros_like(thresholds)
+            fpr = torch.zeros_like(thres)
         else:
             fpr = fps / fps[-1]
 
@@ -72,23 +73,24 @@ def _binary_roc_compute(
                 " Returning zero tensor in true positive score",
                 UserWarning,
             )
-            tpr = torch.zeros_like(thresholds)
+            tpr = torch.zeros_like(thres)
         else:
             tpr = tps / tps[-1]
 
-    return fpr, tpr, thresholds
+    return fpr, tpr, thres
 
 
 def binary_roc(
     preds: Tensor,
     target: Tensor,
-    thresholds: Optional[Union[int, List[float], Tensor]] = None,
+    thresholds: Optional[Union[int, list[float], Tensor]] = None,
     ignore_index: Optional[int] = None,
     validate_args: bool = True,
-) -> Tuple[Tensor, Tensor, Tensor]:
-    r"""Computes the Receiver Operating Characteristic (ROC) for binary tasks. The curve consist of multiple pairs
-    of true positive rate (TPR) and false positive rate (FPR) values evaluated at different thresholds, such that
-    the tradeoff between the two values can be seen.
+) -> tuple[Tensor, Tensor, Tensor]:
+    r"""Compute the Receiver Operating Characteristic (ROC) for binary tasks.
+
+    The curve consist of multiple pairs of true positive rate (TPR) and false positive rate (FPR) values evaluated at
+    different thresholds, such that the tradeoff between the two values can be seen.
 
     Accepts the following input tensors:
 
@@ -123,6 +125,8 @@ def binary_roc(
             - If set to an 1d `tensor` of floats, will use the indicated thresholds in the tensor as
               bins for the calculation.
 
+        ignore_index:
+            Specifies a target value that is ignored and does not contribute to the metric calculation
         validate_args: bool indicating if input arguments and tensors should be validated for correctness.
             Set to ``False`` for faster computations.
 
@@ -145,6 +149,7 @@ def binary_roc(
         (tensor([0.0000, 0.5000, 0.5000, 0.5000, 1.0000]),
          tensor([0., 0., 1., 1., 1.]),
          tensor([1.0000, 0.7500, 0.5000, 0.2500, 0.0000]))
+
     """
     if validate_args:
         _binary_precision_recall_curve_arg_validation(thresholds, ignore_index)
@@ -155,10 +160,14 @@ def binary_roc(
 
 
 def _multiclass_roc_compute(
-    state: Union[Tensor, Tuple[Tensor, Tensor]],
+    state: Union[Tensor, tuple[Tensor, Tensor]],
     num_classes: int,
     thresholds: Optional[Tensor],
-) -> Union[Tuple[Tensor, Tensor, Tensor], Tuple[List[Tensor], List[Tensor], List[Tensor]]]:
+    average: Optional[Literal["micro", "macro"]] = None,
+) -> Union[tuple[Tensor, Tensor, Tensor], tuple[List[Tensor], List[Tensor], List[Tensor]]]:
+    if average == "micro":
+        return _binary_roc_compute(state, thresholds, pos_label=1)
+
     if isinstance(state, Tensor) and thresholds is not None:
         tps = state[:, :, 1, 1]
         fps = state[:, :, 0, 1]
@@ -166,28 +175,48 @@ def _multiclass_roc_compute(
         tns = state[:, :, 0, 0]
         tpr = _safe_divide(tps, tps + fns).flip(0).T
         fpr = _safe_divide(fps, fps + tns).flip(0).T
-        thresholds = thresholds.flip(0)
+        thres = thresholds.flip(0)
+        tensor_state = True
     else:
-        fpr, tpr, thresholds = [], [], []
+        fpr_list, tpr_list, thres_list = [], [], []
         for i in range(num_classes):
-            res = _binary_roc_compute([state[0][:, i], state[1]], thresholds=None, pos_label=i)
-            fpr.append(res[0])
-            tpr.append(res[1])
-            thresholds.append(res[2])
-    return fpr, tpr, thresholds
+            res = _binary_roc_compute((state[0][:, i], state[1]), thresholds=None, pos_label=i)
+            fpr_list.append(res[0])
+            tpr_list.append(res[1])
+            thres_list.append(res[2])
+        tensor_state = False
+
+    if average == "macro":
+        thres = thres.repeat(num_classes) if tensor_state else torch.cat(thres_list, dim=0)
+        thres = thres.sort(descending=True).values
+        mean_fpr = fpr.flatten() if tensor_state else torch.cat(fpr_list, dim=0)
+        mean_fpr = mean_fpr.sort().values
+        mean_tpr = torch.zeros_like(mean_fpr)
+        for i in range(num_classes):
+            mean_tpr += interp(
+                mean_fpr, fpr[i] if tensor_state else fpr_list[i], tpr[i] if tensor_state else tpr_list[i]
+            )
+        mean_tpr /= num_classes
+        return mean_fpr, mean_tpr, thres
+
+    if tensor_state:
+        return fpr, tpr, thres
+    return fpr_list, tpr_list, thres_list
 
 
 def multiclass_roc(
     preds: Tensor,
     target: Tensor,
     num_classes: int,
-    thresholds: Optional[Union[int, List[float], Tensor]] = None,
+    thresholds: Optional[Union[int, list[float], Tensor]] = None,
+    average: Optional[Literal["micro", "macro"]] = None,
     ignore_index: Optional[int] = None,
     validate_args: bool = True,
-) -> Union[Tuple[Tensor, Tensor, Tensor], Tuple[List[Tensor], List[Tensor], List[Tensor]]]:
-    r"""Computes the Receiver Operating Characteristic (ROC) for multiclass tasks. The curve consist of multiple
-    pairs of true positive rate (TPR) and false positive rate (FPR) values evaluated at different thresholds, such
-    that the tradeoff between the two values can be seen.
+) -> Union[tuple[Tensor, Tensor, Tensor], tuple[List[Tensor], List[Tensor], List[Tensor]]]:
+    r"""Compute the Receiver Operating Characteristic (ROC) for multiclass tasks.
+
+    The curve consist of multiple pairs of true positive rate (TPR) and false positive rate (FPR) values evaluated at
+    different thresholds, such that the tradeoff between the two values can be seen.
 
     Accepts the following input tensors:
 
@@ -211,7 +240,7 @@ def multiclass_roc(
     Args:
         preds: Tensor with predictions
         target: Tensor with true labels
-        num_classes: Integer specifing the number of classes
+        num_classes: Integer specifying the number of classes
         thresholds:
             Can be one of:
 
@@ -223,6 +252,15 @@ def multiclass_roc(
             - If set to an 1d `tensor` of floats, will use the indicated thresholds in the tensor as
               bins for the calculation.
 
+        average:
+            If aggregation of curves should be applied. By default, the curves are not aggregated and a curve for
+            each class is returned. If `average` is set to ``"micro"``, the metric will aggregate the curves by one hot
+            encoding the targets and flattening the predictions, considering all classes jointly as a binary problem.
+            If `average` is set to ``"macro"``, the metric will aggregate the curves by first interpolating the curves
+            from each class at a combined set of thresholds and then average over the classwise interpolated curves.
+            See `averaging curve objects`_ for more info on the different averaging methods.
+        ignore_index:
+            Specifies a target value that is ignored and does not contribute to the metric calculation
         validate_args: bool indicating if input arguments and tensors should be validated for correctness.
             Set to ``False`` for faster computations.
 
@@ -271,23 +309,29 @@ def multiclass_roc(
                  [0., 0., 0., 0., 1.],
                  [0., 0., 0., 0., 0.]]),
          tensor([1.0000, 0.7500, 0.5000, 0.2500, 0.0000]))
+
     """
     if validate_args:
-        _multiclass_precision_recall_curve_arg_validation(num_classes, thresholds, ignore_index)
+        _multiclass_precision_recall_curve_arg_validation(num_classes, thresholds, ignore_index, average)
         _multiclass_precision_recall_curve_tensor_validation(preds, target, num_classes, ignore_index)
     preds, target, thresholds = _multiclass_precision_recall_curve_format(
-        preds, target, num_classes, thresholds, ignore_index
+        preds,
+        target,
+        num_classes,
+        thresholds,
+        ignore_index,
+        average,
     )
-    state = _multiclass_precision_recall_curve_update(preds, target, num_classes, thresholds)
-    return _multiclass_roc_compute(state, num_classes, thresholds)
+    state = _multiclass_precision_recall_curve_update(preds, target, num_classes, thresholds, average)
+    return _multiclass_roc_compute(state, num_classes, thresholds, average)
 
 
 def _multilabel_roc_compute(
-    state: Union[Tensor, Tuple[Tensor, Tensor]],
+    state: Union[Tensor, tuple[Tensor, Tensor]],
     num_labels: int,
     thresholds: Optional[Tensor],
     ignore_index: Optional[int] = None,
-) -> Union[Tuple[Tensor, Tensor, Tensor], Tuple[List[Tensor], List[Tensor], List[Tensor]]]:
+) -> Union[tuple[Tensor, Tensor, Tensor], tuple[List[Tensor], List[Tensor], List[Tensor]]]:
     if isinstance(state, Tensor) and thresholds is not None:
         tps = state[:, :, 1, 1]
         fps = state[:, :, 0, 1]
@@ -295,9 +339,9 @@ def _multilabel_roc_compute(
         tns = state[:, :, 0, 0]
         tpr = _safe_divide(tps, tps + fns).flip(0).T
         fpr = _safe_divide(fps, fps + tns).flip(0).T
-        thresholds = thresholds.flip(0)
+        thres = thresholds.flip(0)
     else:
-        fpr, tpr, thresholds = [], [], []
+        fpr, tpr, thres = [], [], []  # type: ignore[assignment]
         for i in range(num_labels):
             preds = state[0][:, i]
             target = state[1][:, i]
@@ -305,24 +349,25 @@ def _multilabel_roc_compute(
                 idx = target == ignore_index
                 preds = preds[~idx]
                 target = target[~idx]
-            res = _binary_roc_compute([preds, target], thresholds=None, pos_label=1)
+            res = _binary_roc_compute((preds, target), thresholds=None, pos_label=1)
             fpr.append(res[0])
             tpr.append(res[1])
-            thresholds.append(res[2])
-    return fpr, tpr, thresholds
+            thres.append(res[2])
+    return fpr, tpr, thres
 
 
 def multilabel_roc(
     preds: Tensor,
     target: Tensor,
     num_labels: int,
-    thresholds: Optional[Union[int, List[float], Tensor]] = None,
+    thresholds: Optional[Union[int, list[float], Tensor]] = None,
     ignore_index: Optional[int] = None,
     validate_args: bool = True,
-) -> Union[Tuple[Tensor, Tensor, Tensor], Tuple[List[Tensor], List[Tensor], List[Tensor]]]:
-    r"""Computes the Receiver Operating Characteristic (ROC) for multilabel tasks. The curve consist of multiple
-    pairs of true positive rate (TPR) and false positive rate (FPR) values evaluated at different thresholds, such
-    that the tradeoff between the two values can be seen.
+) -> Union[tuple[Tensor, Tensor, Tensor], tuple[List[Tensor], List[Tensor], List[Tensor]]]:
+    r"""Compute the Receiver Operating Characteristic (ROC) for multilabel tasks.
+
+    The curve consist of multiple pairs of true positive rate (TPR) and false positive rate (FPR) values evaluated at
+    different thresholds, such that the tradeoff between the two values can be seen.
 
     Accepts the following input tensors:
 
@@ -346,7 +391,7 @@ def multilabel_roc(
     Args:
         preds: Tensor with predictions
         target: Tensor with true labels
-        num_labels: Integer specifing the number of labels
+        num_labels: Integer specifying the number of labels
         thresholds:
             Can be one of:
 
@@ -358,6 +403,8 @@ def multilabel_roc(
             - If set to an 1d `tensor` of floats, will use the indicated thresholds in the tensor as
               bins for the calculation.
 
+        ignore_index:
+            Specifies a target value that is ignored and does not contribute to the metric calculation
         validate_args: bool indicating if input arguments and tensors should be validated for correctness.
             Set to ``False`` for faster computations.
 
@@ -409,6 +456,7 @@ def multilabel_roc(
                  [0.0000, 0.0000, 1.0000, 1.0000, 1.0000],
                  [0.0000, 0.3333, 0.3333, 0.6667, 1.0000]]),
          tensor([1.0000, 0.7500, 0.5000, 0.2500, 0.0000]))
+
     """
     if validate_args:
         _multilabel_precision_recall_curve_arg_validation(num_labels, thresholds, ignore_index)
@@ -424,19 +472,23 @@ def roc(
     preds: Tensor,
     target: Tensor,
     task: Literal["binary", "multiclass", "multilabel"],
-    thresholds: Optional[Union[int, List[float], Tensor]] = None,
+    thresholds: Optional[Union[int, list[float], Tensor]] = None,
     num_classes: Optional[int] = None,
     num_labels: Optional[int] = None,
+    average: Optional[Literal["micro", "macro"]] = None,
     ignore_index: Optional[int] = None,
     validate_args: bool = True,
-) -> Union[Tuple[Tensor, Tensor, Tensor], Tuple[List[Tensor], List[Tensor], List[Tensor]]]:
-    r"""Computes the Receiver Operating Characteristic (ROC). The curve consist of multiple pairs of true positive
-    rate (TPR) and false positive rate (FPR) values evaluated at different thresholds, such that the tradeoff
-    between the two values can be seen.
+) -> Union[tuple[Tensor, Tensor, Tensor], tuple[List[Tensor], List[Tensor], List[Tensor]]]:
+    r"""Compute the Receiver Operating Characteristic (ROC).
+
+    The curve consist of multiple pairs of true positive rate (TPR) and false positive rate (FPR) values evaluated at
+    different thresholds, such that the tradeoff between the two values can be seen.
 
     This function is a simple wrapper to get the task specific versions of this metric, which is done by setting the
     ``task`` argument to either ``'binary'``, ``'multiclass'`` or ``multilabel``. See the documentation of
-    :func:`binary_roc`, :func:`multiclass_roc` and :func:`multilabel_roc` for the specific details of each argument
+    :func:`~torchmetrics.functional.classification.binary_roc`,
+    :func:`~torchmetrics.functional.classification.multiclass_roc` and
+    :func:`~torchmetrics.functional.classification.multilabel_roc` for the specific details of each argument
     influence and examples.
 
     Legacy Example:
@@ -482,15 +534,17 @@ def roc(
         [tensor([1.0000, 0.8603, 0.8191, 0.3584, 0.2286]),
          tensor([1.0000, 0.7576, 0.3680, 0.3468, 0.0745]),
          tensor([1.0000, 0.1837, 0.1338, 0.1183, 0.1138])]
+
     """
-    if task == "binary":
+    task = ClassificationTask.from_str(task)
+    if task == ClassificationTask.BINARY:
         return binary_roc(preds, target, thresholds, ignore_index, validate_args)
-    if task == "multiclass":
-        assert isinstance(num_classes, int)
-        return multiclass_roc(preds, target, num_classes, thresholds, ignore_index, validate_args)
-    if task == "multilabel":
-        assert isinstance(num_labels, int)
+    if task == ClassificationTask.MULTICLASS:
+        if not isinstance(num_classes, int):
+            raise ValueError(f"`num_classes` is expected to be `int` but `{type(num_classes)} was passed.`")
+        return multiclass_roc(preds, target, num_classes, thresholds, average, ignore_index, validate_args)
+    if task == ClassificationTask.MULTILABEL:
+        if not isinstance(num_labels, int):
+            raise ValueError(f"`num_labels` is expected to be `int` but `{type(num_labels)} was passed.`")
         return multilabel_roc(preds, target, num_labels, thresholds, ignore_index, validate_args)
-    raise ValueError(
-        f"Expected argument `task` to either be `'binary'`, `'multiclass'` or `'multilabel'` but got {task}"
-    )
+    raise ValueError(f"Task {task} not supported, expected one of {ClassificationTask}.")
