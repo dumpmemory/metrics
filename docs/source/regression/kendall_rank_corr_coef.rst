@@ -5,18 +5,17 @@
 
 .. include:: ../links.rst
 
-#######################
-Kendal Rank Corr. Coef.
-#######################
+########################
+Kendall Rank Corr. Coef.
+########################
 
 Module Interface
 ________________
 
 .. autoclass:: torchmetrics.KendallRankCorrCoef
-    :noindex:
+    :exclude-members: update, compute
 
 Functional Interface
 ____________________
 
 .. autofunction:: torchmetrics.functional.kendall_rank_corrcoef
-    :noindex:
