@@ -1,4 +1,4 @@
-# Copyright The PyTorch Lightning team.
+# Copyright The Lightning team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,8 +14,8 @@
 from typing import Any, List, Optional
 
 import torch
-import torch.nn.functional as F
 from torch import Tensor
+from torch.nn import functional as F  # noqa: N812
 from typing_extensions import Literal
 
 
@@ -31,6 +31,7 @@ def reduce(x: Tensor, reduction: Literal["elementwise_mean", "sum", "none", None
 
     Raise:
         ValueError if an invalid reduction parameter was given
+
     """
     if reduction == "elementwise_mean":
         return torch.mean(x)
@@ -47,11 +48,10 @@ def class_reduce(
     weights: Tensor,
     class_reduction: Literal["micro", "macro", "weighted", "none", None] = "none",
 ) -> Tensor:
-    """
-    Function used to reduce classification metrics of the form ``num / denom * weights``.
-    For example for calculating standard accuracy the num would be number of
-    true positives per class, denom would be the support per class, and weights
-    would be a tensor of 1s
+    """Reduce classification metrics of the form ``num / denom * weights``.
+
+    For example for calculating standard accuracy the num would be number of true positives per class, denom would be
+    the support per class, and weights would be a tensor of 1s.
 
     Args:
         num: numerator tensor
@@ -70,10 +70,7 @@ def class_reduce(
 
     """
     valid_reduction = ("micro", "macro", "weighted", "none", None)
-    if class_reduction == "micro":
-        fraction = torch.sum(num) / torch.sum(denom)
-    else:
-        fraction = num / denom
+    fraction = torch.sum(num) / torch.sum(denom) if class_reduction == "micro" else num / denom
 
     # We need to take care of instances where the denom can be 0
     # for some (or all) classes which will produce nans
@@ -88,19 +85,21 @@ def class_reduce(
     if class_reduction == "none" or class_reduction is None:
         return fraction
 
-    raise ValueError(
-        f"Reduction parameter {class_reduction} unknown." f" Choose between one of these: {valid_reduction}"
-    )
+    raise ValueError(f"Reduction parameter {class_reduction} unknown. Choose between one of these: {valid_reduction}")
 
 
 def _simple_gather_all_tensors(result: Tensor, group: Any, world_size: int) -> List[Tensor]:
-    gathered_result = [torch.zeros_like(result) for _ in range(world_size)]
-    torch.distributed.all_gather(gathered_result, result, group)
+    with torch.no_grad():
+        gathered_result = [torch.zeros_like(result) for _ in range(world_size)]
+        torch.distributed.all_gather(gathered_result, result, group)
+    # to propagate autograd graph from local rank
+    gathered_result[torch.distributed.get_rank(group)] = result
     return gathered_result
 
 
 def gather_all_tensors(result: Tensor, group: Optional[Any] = None) -> List[Tensor]:
-    """Function to gather all tensors from several ddp processes onto a list that is broadcasted to all processes.
+    """Gather all tensors from several ddp processes onto a list that is broadcast to all processes.
+
     Works on tensors that have the same number of dimensions, but where each dimension may differ. In this case
     tensors are padded, gathered and then trimmed to secure equal workload for all processes.
 
@@ -109,8 +108,8 @@ def gather_all_tensors(result: Tensor, group: Optional[Any] = None) -> List[Tens
         group: the process group to gather results from. Defaults to all processes (world)
 
     Return:
-        gathered_result: list with size equal to the process group where
-            ``gathered_result[i]`` corresponds to result tensor from process ``i``
+        list with size equal to the process group where element i corresponds to result tensor from process i
+
     """
     if group is None:
         group = torch.distributed.group.WORLD
@@ -137,15 +136,18 @@ def gather_all_tensors(result: Tensor, group: Optional[Any] = None) -> List[Tens
         return _simple_gather_all_tensors(result, group, world_size)
 
     # 3. If not, we need to pad each local tensor to maximum size, gather and then truncate
-    pad_dims = []
-    pad_by = (max_size - local_size).detach().cpu()
-    for val in reversed(pad_by):
-        pad_dims.append(0)
-        pad_dims.append(val.item())
-    result_padded = F.pad(result, pad_dims)
-    gathered_result = [torch.zeros_like(result_padded) for _ in range(world_size)]
-    torch.distributed.all_gather(gathered_result, result_padded, group)
-    for idx, item_size in enumerate(local_sizes):
-        slice_param = [slice(dim_size) for dim_size in item_size]
-        gathered_result[idx] = gathered_result[idx][slice_param]
+    with torch.no_grad():
+        pad_dims = []
+        pad_by = (max_size - local_size).detach().cpu()
+        for val in reversed(pad_by):
+            pad_dims.append(0)
+            pad_dims.append(val.item())
+        result_padded = F.pad(result, pad_dims)
+        gathered_result = [torch.zeros_like(result_padded) for _ in range(world_size)]
+        torch.distributed.all_gather(gathered_result, result_padded, group)
+        for idx, item_size in enumerate(local_sizes):
+            slice_param = [slice(dim_size) for dim_size in item_size]
+            gathered_result[idx] = gathered_result[idx][slice_param]
+    # to propagate autograd graph from local rank
+    gathered_result[torch.distributed.get_rank(group)] = result
     return gathered_result

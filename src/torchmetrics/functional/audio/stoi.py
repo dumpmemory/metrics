@@ -1,4 +1,4 @@
-# Copyright The PyTorch Lightning team.
+# Copyright The Lightning team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,30 +18,29 @@ from torch import Tensor
 from torchmetrics.utilities.checks import _check_same_shape
 from torchmetrics.utilities.imports import _PYSTOI_AVAILABLE
 
-if _PYSTOI_AVAILABLE:
-    from pystoi import stoi as stoi_backend
-else:
-    stoi_backend = None
+if not _PYSTOI_AVAILABLE:
     __doctest_skip__ = ["short_time_objective_intelligibility"]
 
 
 def short_time_objective_intelligibility(
     preds: Tensor, target: Tensor, fs: int, extended: bool = False, keep_same_device: bool = False
 ) -> Tensor:
-    r"""Calculates STOI (Short-Time Objective Intelligibility) metric for evaluating speech signals. Intelligibility
-    measure which is highly correlated with the intelligibility of degraded speech signals, e.g., due to additive
-    noise, single-/multi-channel noise reduction, binary masking and vocoded speech as in CI simulations. The STOI-
-    measure is intrusive, i.e., a function of the clean and degraded speech signals. STOI may be a good alternative
+    r"""Calculate STOI (Short-Time Objective Intelligibility) metric for evaluating speech signals.
+
+    Intelligibility measure which is highly correlated with the intelligibility of degraded speech signals, e.g., due to
+    additive noise, single-/multi-channel noise reduction, binary masking and vocoded speech as in CI simulations. The
+    STOI-measure is intrusive, i.e., a function of the clean and degraded speech signals. STOI may be a good alternative
     to the speech intelligibility index (SII) or the speech transmission index (STI), when you are interested in
     the effect of nonlinear processing to noisy speech, e.g., noise reduction, binary masking algorithms, on speech
-    intelligibility. Description taken from  `Cees Taal's website`_ and for further defails see `STOI ref1`_ and
+    intelligibility. Description taken from  `Cees Taal's website`_ and for further details see `STOI ref1`_ and
     `STOI ref2`_.
 
     This metric is a wrapper for the `pystoi package`_. As the implementation backend implementation only supports
     calculations on CPU, all input will automatically be moved to CPU to perform the metric calculation before being
     moved back to the original device.
 
-    .. note:: using this metrics requires you to have ``pystoi`` install. Either install as ``pip install
+    .. hint::
+        Usingsing this metrics requires you to have ``pystoi`` install. Either install as ``pip install
         torchmetrics[audio]`` or ``pip install pystoi``
 
     Args:
@@ -61,19 +60,21 @@ def short_time_objective_intelligibility(
             If ``preds`` and ``target`` does not have the same shape
 
     Example:
+        >>> from torch import randn
         >>> from torchmetrics.functional.audio.stoi import short_time_objective_intelligibility
-        >>> import torch
-        >>> g = torch.manual_seed(1)
-        >>> preds = torch.randn(8000)
-        >>> target = torch.randn(8000)
+        >>> preds = randn(8000)
+        >>> target = randn(8000)
         >>> short_time_objective_intelligibility(preds, target, 8000).float()
-        tensor(-0.0100)
+        tensor(-0.084...)
+
     """
     if not _PYSTOI_AVAILABLE:
         raise ModuleNotFoundError(
             "ShortTimeObjectiveIntelligibility metric requires that `pystoi` is installed."
             " Either install as `pip install torchmetrics[audio]` or `pip install pystoi`."
         )
+    from pystoi import stoi as stoi_backend
+
     _check_same_shape(preds, target)
 
     if len(preds.shape) == 1:
@@ -89,6 +90,6 @@ def short_time_objective_intelligibility(
         stoi_val = stoi_val.reshape(preds.shape[:-1])
 
     if keep_same_device:
-        stoi_val = stoi_val.to(preds.device)
+        return stoi_val.to(preds.device)
 
     return stoi_val
