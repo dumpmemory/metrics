@@ -1,4 +1,4 @@
-# Copyright The PyTorch Lightning team.
+# Copyright The Lightning team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,7 +11,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from torchmetrics.utilities.imports import _TRANSFORMERS_AVAILABLE
+from torchmetrics.utilities.imports import _TRANSFORMERS_GREATER_EQUAL_4_10
 
-if _TRANSFORMERS_AVAILABLE:
-    from torchmetrics.multimodal.clip_score import CLIPScore  # noqa: F401
+if _TRANSFORMERS_GREATER_EQUAL_4_10:
+    from torchmetrics.multimodal.clip_iqa import CLIPImageQualityAssessment
+    from torchmetrics.multimodal.clip_score import CLIPScore
+
+    __all__ = ["CLIPImageQualityAssessment", "CLIPScore"]
