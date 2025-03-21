@@ -1,4 +1,4 @@
-# Copyright The PyTorch Lightning team.
+# Copyright The Lightning team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Tuple
 
 import torch
 from torch import Tensor
@@ -21,7 +20,7 @@ from torchmetrics.utilities.checks import _check_same_shape
 
 
 def _find_repeats(data: Tensor) -> Tensor:
-    """find and return values which have repeats i.e. the same value are more than once in the tensor."""
+    """Find and return values which have repeats i.e. the same value are more than once in the tensor."""
     temp = data.detach().clone()
     temp = temp.sort()[0]
 
@@ -36,10 +35,11 @@ def _find_repeats(data: Tensor) -> Tensor:
 def _rank_data(data: Tensor) -> Tensor:
     """Calculate the rank for each element of a tensor.
 
-    The rank refers to the indices of an element in the corresponding sorted tensor (starting from 1).
-    Duplicates of the same value will be assigned the mean of their rank.
+    The rank refers to the indices of an element in the corresponding sorted tensor (starting from 1). Duplicates of the
+    same value will be assigned the mean of their rank.
 
     Adopted from `Rank of element tensor`_
+
     """
     n = data.numel()
     rank = torch.empty_like(data)
@@ -53,16 +53,17 @@ def _rank_data(data: Tensor) -> Tensor:
     return rank
 
 
-def _spearman_corrcoef_update(preds: Tensor, target: Tensor, num_outputs: int) -> Tuple[Tensor, Tensor]:
-    """Updates and returns variables required to compute Spearman Correlation Coefficient.
+def _spearman_corrcoef_update(preds: Tensor, target: Tensor, num_outputs: int) -> tuple[Tensor, Tensor]:
+    """Update and returns variables required to compute Spearman Correlation Coefficient.
 
-    Checks for same shape and type of input tensors.
+    Check for same shape and type of input tensors.
 
     Args:
         preds: Predicted tensor
         target: Ground truth tensor
-    """
+        num_outputs: Number of outputs in multioutput setting
 
+    """
     if not (preds.is_floating_point() and target.is_floating_point()):
         raise TypeError(
             "Expected `preds` and `target` both to be floating point tensors, but got {pred.dtype} and {target.dtype}"
@@ -74,7 +75,7 @@ def _spearman_corrcoef_update(preds: Tensor, target: Tensor, num_outputs: int) -
 
 
 def _spearman_corrcoef_compute(preds: Tensor, target: Tensor, eps: float = 1e-6) -> Tensor:
-    """Computes Spearman Correlation Coefficient.
+    """Compute Spearman Correlation Coefficient.
 
     Args:
         preds: Predicted tensor
@@ -87,6 +88,7 @@ def _spearman_corrcoef_compute(preds: Tensor, target: Tensor, eps: float = 1e-6)
         >>> preds, target = _spearman_corrcoef_update(preds, target, num_outputs=1)
         >>> _spearman_corrcoef_compute(preds, target)
         tensor(1.0000)
+
     """
     if preds.ndim == 1:
         preds = _rank_data(preds)
@@ -107,7 +109,7 @@ def _spearman_corrcoef_compute(preds: Tensor, target: Tensor, eps: float = 1e-6)
 
 
 def spearman_corrcoef(preds: Tensor, target: Tensor) -> Tensor:
-    r"""Computes `spearmans rank correlation coefficient`_:
+    r"""Compute `spearmans rank correlation coefficient`_.
 
     .. math:
         r_s = = \frac{cov(rg_x, rg_y)}{\sigma_{rg_x} * \sigma_{rg_y}}
@@ -120,18 +122,19 @@ def spearman_corrcoef(preds: Tensor, target: Tensor) -> Tensor:
         target: ground truth scores
 
     Example (single output regression):
-        >>> from torchmetrics.functional import spearman_corrcoef
+        >>> from torchmetrics.functional.regression import spearman_corrcoef
         >>> target = torch.tensor([3, -0.5, 2, 7])
         >>> preds = torch.tensor([2.5, 0.0, 2, 8])
         >>> spearman_corrcoef(preds, target)
         tensor(1.0000)
 
     Example (multi output regression):
-        >>> from torchmetrics.functional import spearman_corrcoef
+        >>> from torchmetrics.functional.regression import spearman_corrcoef
         >>> target = torch.tensor([[3, -0.5], [2, 7]])
         >>> preds = torch.tensor([[2.5, 0.0], [2, 8]])
         >>> spearman_corrcoef(preds, target)
         tensor([1.0000, 1.0000])
+
     """
     preds, target = _spearman_corrcoef_update(preds, target, num_outputs=1 if preds.ndim == 1 else preds.shape[-1])
     return _spearman_corrcoef_compute(preds, target)

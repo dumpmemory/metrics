@@ -1,4 +1,4 @@
-# Copyright The PyTorch Lightning team.
+# Copyright The Lightning team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Tuple
 
 import torch
 from torch import Tensor
@@ -21,15 +20,14 @@ from torchmetrics.utilities.checks import _check_same_shape
 from torchmetrics.utilities.distributed import reduce
 
 
-def _sam_update(preds: Tensor, target: Tensor) -> Tuple[Tensor, Tensor]:
-    """Updates and returns variables required to compute Spectral Angle Mapper. Checks for same shape and type of
-    the input tensors.
+def _sam_update(preds: Tensor, target: Tensor) -> tuple[Tensor, Tensor]:
+    """Update and returns variables required to compute Spectral Angle Mapper.
 
     Args:
         preds: Predicted tensor
         target: Ground truth tensor
-    """
 
+    """
     if preds.dtype != target.dtype:
         raise TypeError(
             "Expected `preds` and `target` to have the same data type."
@@ -38,8 +36,7 @@ def _sam_update(preds: Tensor, target: Tensor) -> Tuple[Tensor, Tensor]:
     _check_same_shape(preds, target)
     if len(preds.shape) != 4:
         raise ValueError(
-            "Expected `preds` and `target` to have BxCxHxW shape."
-            f" Got preds: {preds.shape} and target: {target.shape}."
+            f"Expected `preds` and `target` to have BxCxHxW shape. Got preds: {preds.shape} and target: {target.shape}."
         )
     if (preds.shape[1] <= 1) or (target.shape[1] <= 1):
         raise ValueError(
@@ -54,7 +51,7 @@ def _sam_compute(
     target: Tensor,
     reduction: Literal["elementwise_mean", "sum", "none", None] = "elementwise_mean",
 ) -> Tensor:
-    """Computes Spectral Angle Mapper.
+    """Compute Spectral Angle Mapper.
 
     Args:
         preds: estimated image
@@ -66,11 +63,13 @@ def _sam_compute(
             - ``'none'`` or ``None``: no reduction will be applied
 
     Example:
-        >>> preds = torch.rand([16, 3, 16, 16], generator=torch.manual_seed(42))
-        >>> target = torch.rand([16, 3, 16, 16], generator=torch.manual_seed(123))
+        >>> from torch import rand
+        >>> preds = rand([16, 3, 16, 16])
+        >>> target = rand([16, 3, 16, 16])
         >>> preds, target = _sam_update(preds, target)
         >>> _sam_compute(preds, target)
-        tensor(0.5943)
+        tensor(0.5914)
+
     """
     dot_product = (preds * target).sum(dim=1)
     preds_norm = preds.norm(dim=1)
@@ -105,16 +104,18 @@ def spectral_angle_mapper(
             If ``preds`` and ``target`` don't have ``BxCxHxW shape``.
 
     Example:
-        >>> from torchmetrics.functional import spectral_angle_mapper
-        >>> preds = torch.rand([16, 3, 16, 16], generator=torch.manual_seed(42))
-        >>> target = torch.rand([16, 3, 16, 16], generator=torch.manual_seed(123))
+        >>> from torch import rand
+        >>> from torchmetrics.functional.image import spectral_angle_mapper
+        >>> preds = rand([16, 3, 16, 16],)
+        >>> target = rand([16, 3, 16, 16])
         >>> spectral_angle_mapper(preds, target)
-        tensor(0.5943)
+        tensor(0.5914)
 
     References:
         [1] Roberta H. Yuhas, Alexander F. H. Goetz and Joe W. Boardman, "Discrimination among semi-arid
         landscape endmembers using the Spectral Angle Mapper (SAM) algorithm" in PL, Summaries of the Third Annual JPL
         Airborne Geoscience Workshop, vol. 1, June 1, 1992.
+
     """
     preds, target = _sam_update(preds, target)
     return _sam_compute(preds, target, reduction)
