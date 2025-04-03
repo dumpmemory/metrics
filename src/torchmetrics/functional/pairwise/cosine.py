@@ -1,4 +1,4 @@
-# Copyright The PyTorch Lightning team.
+# Copyright The Lightning team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -24,12 +24,13 @@ from torchmetrics.utilities.compute import _safe_matmul
 def _pairwise_cosine_similarity_update(
     x: Tensor, y: Optional[Tensor] = None, zero_diagonal: Optional[bool] = None
 ) -> Tensor:
-    """Calculates the pairwise cosine similarity matrix.
+    """Calculate the pairwise cosine similarity matrix.
 
     Args:
         x: tensor of shape ``[N,d]``
         y: tensor of shape ``[M,d]``
         zero_diagonal: determines if the diagonal of the distance matrix should be set to zero
+
     """
     x, y, zero_diagonal = _check_input(x, y, zero_diagonal)
 
@@ -50,7 +51,7 @@ def pairwise_cosine_similarity(
     reduction: Literal["mean", "sum", "none", None] = None,
     zero_diagonal: Optional[bool] = None,
 ) -> Tensor:
-    r"""Calculates pairwise cosine similarity:
+    r"""Calculate pairwise cosine similarity.
 
     .. math::
         s_{cos}(x,y) = \frac{<x,y>}{||x|| \cdot ||y||}
@@ -73,7 +74,7 @@ def pairwise_cosine_similarity(
 
     Example:
         >>> import torch
-        >>> from torchmetrics.functional import pairwise_cosine_similarity
+        >>> from torchmetrics.functional.pairwise import pairwise_cosine_similarity
         >>> x = torch.tensor([[2, 3], [3, 5], [5, 8]], dtype=torch.float32)
         >>> y = torch.tensor([[1, 0], [2, 1]], dtype=torch.float32)
         >>> pairwise_cosine_similarity(x, y)
@@ -84,6 +85,7 @@ def pairwise_cosine_similarity(
         tensor([[0.0000, 0.9989, 0.9996],
                 [0.9989, 0.0000, 0.9998],
                 [0.9996, 0.9998, 0.0000]])
+
     """
     distance = _pairwise_cosine_similarity_update(x, y, zero_diagonal)
     return _reduce_distance_matrix(distance, reduction)

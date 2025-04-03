@@ -3,6 +3,8 @@
    :image: https://pl-flash-data.s3.amazonaws.com/assets/thumbnails/tabular_classification.svg
    :tags: Nominal
 
+.. include:: ../links.rst
+
 #############
 Tschuprow's T
 #############
@@ -10,17 +12,15 @@ Tschuprow's T
 Module Interface
 ________________
 
-.. autoclass:: torchmetrics.TschuprowsT
-    :noindex:
+.. autoclass:: torchmetrics.nominal.TschuprowsT
+    :exclude-members: update, compute
 
 Functional Interface
 ____________________
 
-.. autofunction:: torchmetrics.functional.tschuprows_t
-    :noindex:
+.. autofunction:: torchmetrics.functional.nominal.tschuprows_t
 
 tschuprows_t_matrix
 ^^^^^^^^^^^^^^^^^^^
 
 .. autofunction:: torchmetrics.functional.nominal.tschuprows_t_matrix
-    :noindex:

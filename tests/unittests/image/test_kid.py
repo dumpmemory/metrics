@@ -1,4 +1,4 @@
-# Copyright The PyTorch Lightning team.
+# Copyright The Lightning team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,16 +21,17 @@ from torch.utils.data import Dataset
 
 from torchmetrics.image.kid import KernelInceptionDistance
 from torchmetrics.utilities.imports import _TORCH_FIDELITY_AVAILABLE
+from unittests._helpers import seed_all
 
-torch.manual_seed(42)
+seed_all(42)
 
 
-@pytest.mark.skipif(not _TORCH_FIDELITY_AVAILABLE, reason="test requires torch-fidelity")
+@pytest.mark.skipif(not _TORCH_FIDELITY_AVAILABLE, reason="metric requires torch-fidelity")
 def test_no_train():
     """Assert that metric never leaves evaluation mode."""
 
     class MyModel(Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.metric = KernelInceptionDistance()
 
@@ -43,7 +44,7 @@ def test_no_train():
     assert not model.metric.inception.training, "FID metric was changed to training mode which should not happen"
 
 
-@pytest.mark.skipif(not _TORCH_FIDELITY_AVAILABLE, reason="test requires torch-fidelity")
+@pytest.mark.skipif(not _TORCH_FIDELITY_AVAILABLE, reason="metric requires torch-fidelity")
 def test_kid_pickle():
     """Assert that we can initialize the metric and pickle it."""
     metric = KernelInceptionDistance()
@@ -77,15 +78,16 @@ def test_kid_raises_errors_and_warnings():
     with pytest.raises(TypeError, match="Got unknown input to argument `feature`"):
         KernelInceptionDistance(feature=[1, 2])
 
+    m = KernelInceptionDistance()
+    m.update(torch.randint(0, 255, (5, 3, 299, 299), dtype=torch.uint8), real=True)
+    m.update(torch.randint(0, 255, (5, 3, 299, 299), dtype=torch.uint8), real=False)
     with pytest.raises(ValueError, match="Argument `subset_size` should be smaller than the number of samples"):
-        m = KernelInceptionDistance()
-        m.update(torch.randint(0, 255, (5, 3, 299, 299), dtype=torch.uint8), real=True)
-        m.update(torch.randint(0, 255, (5, 3, 299, 299), dtype=torch.uint8), real=False)
         m.compute()
 
 
-@pytest.mark.skipif(not _TORCH_FIDELITY_AVAILABLE, reason="test requires torch-fidelity")
+@pytest.mark.skipif(not _TORCH_FIDELITY_AVAILABLE, reason="metric requires torch-fidelity")
 def test_kid_extra_parameters():
+    """Test that the different input arguments raises expected errors if wrong."""
     with pytest.raises(ValueError, match="Argument `subsets` expected to be integer larger than 0"):
         KernelInceptionDistance(subsets=-1)
 
@@ -102,10 +104,21 @@ def test_kid_extra_parameters():
         KernelInceptionDistance(coef=-1)
 
 
-@pytest.mark.skipif(not _TORCH_FIDELITY_AVAILABLE, reason="test requires torch-fidelity")
-@pytest.mark.parametrize("feature", [64, 192, 768, 2048])
+class _DummyFeatureExtractor(Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.flatten = torch.nn.Flatten()
+        self.extractor = torch.nn.Linear(3 * 299 * 299, 64)
+
+    def __call__(self, img) -> torch.Tensor:
+        img = (img / 125.5).float()  # Convert int img input to float as Linear layer expects float inputs
+        return self.extractor(self.flatten(img))
+
+
+@pytest.mark.skipif(not _TORCH_FIDELITY_AVAILABLE, reason="metric requires torch-fidelity")
+@pytest.mark.parametrize("feature", [64, 192, 768, 2048, _DummyFeatureExtractor()])
 def test_kid_same_input(feature):
-    """test that the metric works."""
+    """Test that the metric works."""
     metric = KernelInceptionDistance(feature=feature, subsets=5, subset_size=2)
 
     for _ in range(2):
@@ -121,20 +134,20 @@ def test_kid_same_input(feature):
 
 
 class _ImgDataset(Dataset):
-    def __init__(self, imgs):
+    def __init__(self, imgs) -> None:
         self.imgs = imgs
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx) -> torch.Tensor:
         return self.imgs[idx]
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.imgs.shape[0]
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="test is too slow without gpu")
-@pytest.mark.skipif(not _TORCH_FIDELITY_AVAILABLE, reason="test requires torch-fidelity")
+@pytest.mark.skipif(not _TORCH_FIDELITY_AVAILABLE, reason="metric requires torch-fidelity")
 def test_compare_kid(tmpdir, feature=2048):
-    """check that the hole pipeline give the same result as torch-fidelity."""
+    """Check that the hole pipeline give the same result as torch-fidelity."""
     from torch_fidelity import calculate_metrics
 
     metric = KernelInceptionDistance(feature=feature, subsets=1, subset_size=100).cuda()
@@ -169,6 +182,7 @@ def test_compare_kid(tmpdir, feature=2048):
 
 @pytest.mark.parametrize("reset_real_features", [True, False])
 def test_reset_real_features_arg(reset_real_features):
+    """Test that `reset_real_features` arg works as expected."""
     metric = KernelInceptionDistance(feature=64, reset_real_features=reset_real_features)
 
     metric.update(torch.randint(0, 180, (2, 3, 299, 299), dtype=torch.uint8), real=True)
@@ -192,17 +206,17 @@ def test_reset_real_features_arg(reset_real_features):
         assert list(metric.real_features[0].shape) == [2, 64]
 
 
-@pytest.mark.parametrize(
-    "normalize, expectation, message",
-    [
-        (True, does_not_raise(), None),
-        (False, pytest.raises(ValueError), "Expecting image as torch.Tensor with dtype=torch.uint8"),
-    ],
-)
-def test_normalize_arg(normalize, expectation, message):
+def test_normalize_arg_true():
     """Test that normalize argument works as expected."""
     img = torch.rand(2, 3, 299, 299)
-    metric = KernelInceptionDistance(normalize=normalize)
-    with expectation as e:
+    metric = KernelInceptionDistance(normalize=True)
+    with does_not_raise():
         metric.update(img, real=True)
-    assert message is None or message in str(e)
+
+
+def test_normalize_arg_false():
+    """Test that normalize argument works as expected."""
+    img = torch.rand(2, 3, 299, 299)
+    metric = KernelInceptionDistance(normalize=False)
+    with pytest.raises(ValueError, match="Expecting image as torch.Tensor with dtype=torch.uint8"):
+        metric.update(img, real=True)
