@@ -1,4 +1,4 @@
-# Copyright The PyTorch Lightning team.
+# Copyright The Lightning team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import itertools
-from typing import Optional, Union
+from typing import Optional
 
 import torch
 from torch import Tensor
@@ -37,6 +37,7 @@ def _conditional_entropy_compute(confmat: Tensor) -> Tensor:
 
     Returns:
         Conditional Entropy Value
+
     """
     confmat = _drop_empty_rows_and_cols(confmat)
     total_occurrences = confmat.sum()
@@ -56,19 +57,20 @@ def _theils_u_update(
     target: Tensor,
     num_classes: int,
     nan_strategy: Literal["replace", "drop"] = "replace",
-    nan_replace_value: Optional[Union[int, float]] = 0.0,
+    nan_replace_value: Optional[float] = 0.0,
 ) -> Tensor:
-    """Computes the bins to update the confusion matrix with for Theil's U calculation.
+    """Compute the bins to update the confusion matrix with for Theil's U calculation.
 
     Args:
         preds: 1D or 2D tensor of categorical (nominal) data
         target: 1D or 2D tensor of categorical (nominal) data
-        num_classes: Integer specifing the number of classes
+        num_classes: Integer specifying the number of classes
         nan_strategy: Indication of whether to replace or drop ``NaN`` values
         nan_replace_value: Value to replace ``NaN`s when ``nan_strategy = 'replace```
 
     Returns:
         Non-reduced confusion matrix
+
     """
     preds = preds.argmax(1) if preds.ndim == 2 else preds
     target = target.argmax(1) if target.ndim == 2 else target
@@ -84,6 +86,7 @@ def _theils_u_compute(confmat: Tensor) -> Tensor:
 
     Returns:
         Theil's U statistic
+
     """
     confmat = _drop_empty_rows_and_cols(confmat)
 
@@ -106,10 +109,9 @@ def theils_u(
     preds: Tensor,
     target: Tensor,
     nan_strategy: Literal["replace", "drop"] = "replace",
-    nan_replace_value: Optional[Union[int, float]] = 0.0,
+    nan_replace_value: Optional[float] = 0.0,
 ) -> Tensor:
-    r"""Compute `Theil's U`_ statistic (Uncertainty Coefficient) measuring the association between two categorical
-    (nominal) data series.
+    r"""Compute `Theils Uncertainty coefficient`_ statistic measuring the association between two nominal data series.
 
     .. math::
         U(X|Y) = \frac{H(X) - H(X|Y)}{H(X)}
@@ -133,15 +135,16 @@ def theils_u(
         nan_replace_value: Value to replace ``NaN``s when ``nan_strategy = 'replace'``
 
     Returns:
-        Theil's U Statistic: Tensor
+        Tensor containing Theil's U statistic
 
     Example:
-        >>> from torchmetrics.functional import theils_u
-        >>> _ = torch.manual_seed(42)
-        >>> preds = torch.randint(10, (10,))
-        >>> target = torch.randint(10, (10,))
+        >>> from torch import randint
+        >>> from torchmetrics.functional.nominal import theils_u
+        >>> preds = randint(10, (10,))
+        >>> target = randint(10, (10,))
         >>> theils_u(preds, target)
         tensor(0.8530)
+
     """
     num_classes = len(torch.cat([preds, target]).unique())
     confmat = _theils_u_update(preds, target, num_classes, nan_strategy, nan_replace_value)
@@ -151,7 +154,7 @@ def theils_u(
 def theils_u_matrix(
     matrix: Tensor,
     nan_strategy: Literal["replace", "drop"] = "replace",
-    nan_replace_value: Optional[Union[int, float]] = 0.0,
+    nan_replace_value: Optional[float] = 0.0,
 ) -> Tensor:
     r"""Compute `Theil's U`_ statistic between a set of multiple variables.
 
@@ -169,15 +172,16 @@ def theils_u_matrix(
         Theil's U statistic for a dataset of categorical variables
 
     Example:
+        >>> from torch import randint
         >>> from torchmetrics.functional.nominal import theils_u_matrix
-        >>> _ = torch.manual_seed(42)
-        >>> matrix = torch.randint(0, 4, (200, 5))
+        >>> matrix = randint(0, 4, (200, 5))
         >>> theils_u_matrix(matrix)
         tensor([[1.0000, 0.0202, 0.0142, 0.0196, 0.0353],
                 [0.0202, 1.0000, 0.0070, 0.0136, 0.0065],
                 [0.0143, 0.0070, 1.0000, 0.0125, 0.0206],
                 [0.0198, 0.0137, 0.0125, 1.0000, 0.0312],
                 [0.0352, 0.0065, 0.0204, 0.0308, 1.0000]])
+
     """
     _nominal_input_validation(nan_strategy, nan_replace_value)
     num_variables = matrix.shape[1]

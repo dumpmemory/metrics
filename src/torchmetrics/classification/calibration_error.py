@@ -1,4 +1,4 @@
-# Copyright The PyTorch Lightning team.
+# Copyright The Lightning team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,12 +11,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Any, Optional
+from collections.abc import Sequence
+from typing import Any, List, Optional, Union
 
-import torch
 from torch import Tensor
 from typing_extensions import Literal
 
+from torchmetrics.classification.base import _ClassificationTaskWrapper
 from torchmetrics.functional.classification.calibration_error import (
     _binary_calibration_error_arg_validation,
     _binary_calibration_error_tensor_validation,
@@ -30,13 +31,19 @@ from torchmetrics.functional.classification.calibration_error import (
 )
 from torchmetrics.metric import Metric
 from torchmetrics.utilities.data import dim_zero_cat
+from torchmetrics.utilities.enums import ClassificationTaskNoMultilabel
+from torchmetrics.utilities.imports import _MATPLOTLIB_AVAILABLE
+from torchmetrics.utilities.plot import _AX_TYPE, _PLOT_OUT_TYPE
+
+if not _MATPLOTLIB_AVAILABLE:
+    __doctest_skip__ = ["BinaryCalibrationError.plot", "MulticlassCalibrationError.plot"]
 
 
 class BinaryCalibrationError(Metric):
-    r"""`Computes the Top-label Calibration Error`_ for binary tasks. The expected calibration error can be used to
-    quantify how well a given model is calibrated e.g. how well the predicted output probabilities of the model
-    matches the actual probabilities of the ground truth distribution.
+    r"""`Top-label Calibration Error`_ for binary tasks.
 
+    The expected calibration error can be used to quantify how well a given model is calibrated e.g. how well the
+    predicted output probabilities of the model matches the actual probabilities of the ground truth distribution.
     Three different norms are implemented, each corresponding to variations on the calibration error metric.
 
     .. math::
@@ -52,13 +59,18 @@ class BinaryCalibrationError(Metric):
     predictions in bin :math:`i`, and :math:`b_i` is the fraction of data points in bin :math:`i`. Bins are constructed
     in an uniform way in the [0,1] range.
 
-    Accepts the following input tensors:
+    As input to ``forward`` and ``update`` the metric accepts the following input:
 
-    - ``preds`` (float tensor): ``(N, ...)``. Preds should be a tensor containing probabilities or logits for each
-      observation. If preds has values outside [0,1] range we consider the input to be logits and will auto apply
+    - ``preds`` (:class:`~torch.Tensor`): A float tensor of shape ``(N, ...)`` containing probabilities or logits for
+      each observation. If preds has values outside [0,1] range we consider the input to be logits and will auto apply
       sigmoid per element.
-    - ``target`` (int tensor): ``(N, ...)``. Target should be a tensor containing ground truth labels, and therefore
-      only contain {0,1} values (except if `ignore_index` is specified). The value 1 always encodes the positive class.
+    - ``target`` (:class:`~torch.Tensor`): An int tensor of shape ``(N, ...)`` containing ground truth labels, and
+      therefore only contain {0,1} values (except if `ignore_index` is specified). The value 1 always encodes the
+      positive class.
+
+    As output to ``forward`` and ``compute`` the metric returns the following output:
+
+    - ``bce`` (:class:`~torch.Tensor`): A scalar tensor containing the calibration error
 
     Additional dimension ``...`` will be flattened into the batch dimension.
 
@@ -72,22 +84,30 @@ class BinaryCalibrationError(Metric):
         kwargs: Additional keyword arguments, see :ref:`Metric kwargs` for more info.
 
     Example:
+        >>> from torch import tensor
         >>> from torchmetrics.classification import BinaryCalibrationError
-        >>> preds = torch.tensor([0.25, 0.25, 0.55, 0.75, 0.75])
-        >>> target = torch.tensor([0, 0, 1, 1, 1])
+        >>> preds = tensor([0.25, 0.25, 0.55, 0.75, 0.75])
+        >>> target = tensor([0, 0, 1, 1, 1])
         >>> metric = BinaryCalibrationError(n_bins=2, norm='l1')
         >>> metric(preds, target)
         tensor(0.2900)
-        >>> metric = BinaryCalibrationError(n_bins=2, norm='l2')
-        >>> metric(preds, target)
+        >>> bce = BinaryCalibrationError(n_bins=2, norm='l2')
+        >>> bce(preds, target)
         tensor(0.2918)
-        >>> metric = BinaryCalibrationError(n_bins=2, norm='max')
-        >>> metric(preds, target)
+        >>> bce = BinaryCalibrationError(n_bins=2, norm='max')
+        >>> bce(preds, target)
         tensor(0.3167)
+
     """
+
     is_differentiable: bool = False
     higher_is_better: bool = False
     full_state_update: bool = False
+    plot_lower_bound: float = 0.0
+    plot_upper_bound: float = 1.0
+
+    confidences: List[Tensor]
+    accuracies: List[Tensor]
 
     def __init__(
         self,
@@ -107,7 +127,8 @@ class BinaryCalibrationError(Metric):
         self.add_state("confidences", [], dist_reduce_fx="cat")
         self.add_state("accuracies", [], dist_reduce_fx="cat")
 
-    def update(self, preds: Tensor, target: Tensor) -> None:  # type: ignore
+    def update(self, preds: Tensor, target: Tensor) -> None:
+        """Update metric states with predictions and targets."""
         if self.validate_args:
             _binary_calibration_error_tensor_validation(preds, target, self.ignore_index)
         preds, target = _binary_confusion_matrix_format(
@@ -118,16 +139,59 @@ class BinaryCalibrationError(Metric):
         self.accuracies.append(accuracies)
 
     def compute(self) -> Tensor:
+        """Compute metric."""
         confidences = dim_zero_cat(self.confidences)
         accuracies = dim_zero_cat(self.accuracies)
         return _ce_compute(confidences, accuracies, self.n_bins, norm=self.norm)
 
+    def plot(
+        self, val: Optional[Union[Tensor, Sequence[Tensor]]] = None, ax: Optional[_AX_TYPE] = None
+    ) -> _PLOT_OUT_TYPE:
+        """Plot a single or multiple values from the metric.
+
+        Args:
+            val: Either a single result from calling `metric.forward` or `metric.compute` or a list of these results.
+                If no value is provided, will automatically call `metric.compute` and plot that result.
+            ax: An matplotlib axis object. If provided will add plot to that axis
+
+        Returns:
+            Figure object and Axes object
+
+        Raises:
+            ModuleNotFoundError:
+                If `matplotlib` is not installed
+
+        .. plot::
+            :scale: 75
+
+            >>> from torch import rand, randint
+            >>> # Example plotting a single value
+            >>> from torchmetrics.classification import BinaryCalibrationError
+            >>> metric = BinaryCalibrationError(n_bins=2, norm='l1')
+            >>> metric.update(rand(10), randint(2,(10,)))
+            >>> fig_, ax_ = metric.plot()
+
+        .. plot::
+            :scale: 75
+
+            >>> from torch import rand, randint
+            >>> # Example plotting multiple values
+            >>> from torchmetrics.classification import BinaryCalibrationError
+            >>> metric = BinaryCalibrationError(n_bins=2, norm='l1')
+            >>> values = [ ]
+            >>> for _ in range(10):
+            ...     values.append(metric(rand(10), randint(2,(10,))))
+            >>> fig_, ax_ = metric.plot(values)
+
+        """
+        return self._plot(val, ax)
+
 
 class MulticlassCalibrationError(Metric):
-    r"""`Computes the Top-label Calibration Error`_ for multiclass tasks. The expected calibration error can be used
-    to quantify how well a given model is calibrated e.g. how well the predicted output probabilities of the model
-    matches the actual probabilities of the ground truth distribution.
+    r"""`Top-label Calibration Error`_ for multiclass tasks.
 
+    The expected calibration error can be used to quantify how well a given model is calibrated e.g. how well the
+    predicted output probabilities of the model matches the actual probabilities of the ground truth distribution.
     Three different norms are implemented, each corresponding to variations on the calibration error metric.
 
     .. math::
@@ -143,18 +207,23 @@ class MulticlassCalibrationError(Metric):
     predictions in bin :math:`i`, and :math:`b_i` is the fraction of data points in bin :math:`i`. Bins are constructed
     in an uniform way in the [0,1] range.
 
-    Accepts the following input tensors:
+    As input to ``forward`` and ``update`` the metric accepts the following input:
 
-    - ``preds`` (float tensor): ``(N, C, ...)``. Preds should be a tensor containing probabilities or logits for each
-      observation. If preds has values outside [0,1] range we consider the input to be logits and will auto apply
+    - ``preds`` (:class:`~torch.Tensor`): A float tensor of shape ``(N, C, ...)`` containing probabilities or logits for
+      each observation. If preds has values outside [0,1] range we consider the input to be logits and will auto apply
       softmax per sample.
-    - ``target`` (int tensor): ``(N, ...)``. Target should be a tensor containing ground truth labels, and therefore
-      only contain values in the [0, n_classes-1] range (except if `ignore_index` is specified).
+    - ``target`` (:class:`~torch.Tensor`): An int tensor of shape ``(N, ...)`` containing ground truth labels, and
+      therefore only contain values in the [0, n_classes-1] range (except if `ignore_index` is specified).
 
-    Additional dimension ``...`` will be flattened into the batch dimension.
+    .. tip::
+       Additional dimension ``...`` will be flattened into the batch dimension.
+
+    As output to ``forward`` and ``compute`` the metric returns the following output:
+
+    - ``mcce`` (:class:`~torch.Tensor`): A scalar tensor containing the calibration error
 
     Args:
-        num_classes: Integer specifing the number of classes
+        num_classes: Integer specifying the number of classes
         n_bins: Number of bins to use when computing the metric.
         norm: Norm used to compare empirical and expected probability bins.
         ignore_index:
@@ -164,25 +233,34 @@ class MulticlassCalibrationError(Metric):
         kwargs: Additional keyword arguments, see :ref:`Metric kwargs` for more info.
 
     Example:
+        >>> from torch import tensor
         >>> from torchmetrics.classification import MulticlassCalibrationError
-        >>> preds = torch.tensor([[0.25, 0.20, 0.55],
-        ...                       [0.55, 0.05, 0.40],
-        ...                       [0.10, 0.30, 0.60],
-        ...                       [0.90, 0.05, 0.05]])
-        >>> target = torch.tensor([0, 1, 2, 0])
+        >>> preds = tensor([[0.25, 0.20, 0.55],
+        ...                 [0.55, 0.05, 0.40],
+        ...                 [0.10, 0.30, 0.60],
+        ...                 [0.90, 0.05, 0.05]])
+        >>> target = tensor([0, 1, 2, 0])
         >>> metric = MulticlassCalibrationError(num_classes=3, n_bins=3, norm='l1')
         >>> metric(preds, target)
         tensor(0.2000)
-        >>> metric = MulticlassCalibrationError(num_classes=3, n_bins=3, norm='l2')
-        >>> metric(preds, target)
+        >>> mcce = MulticlassCalibrationError(num_classes=3, n_bins=3, norm='l2')
+        >>> mcce(preds, target)
         tensor(0.2082)
-        >>> metric = MulticlassCalibrationError(num_classes=3, n_bins=3, norm='max')
-        >>> metric(preds, target)
+        >>> mcce = MulticlassCalibrationError(num_classes=3, n_bins=3, norm='max')
+        >>> mcce(preds, target)
         tensor(0.2333)
+
     """
+
     is_differentiable: bool = False
     higher_is_better: bool = False
     full_state_update: bool = False
+    plot_lower_bound: float = 0.0
+    plot_upper_bound: float = 1.0
+    plot_legend_name: str = "Class"
+
+    confidences: List[Tensor]
+    accuracies: List[Tensor]
 
     def __init__(
         self,
@@ -204,7 +282,8 @@ class MulticlassCalibrationError(Metric):
         self.add_state("confidences", [], dist_reduce_fx="cat")
         self.add_state("accuracies", [], dist_reduce_fx="cat")
 
-    def update(self, preds: Tensor, target: Tensor) -> None:  # type: ignore
+    def update(self, preds: Tensor, target: Tensor) -> None:
+        """Update metric states with predictions and targets."""
         if self.validate_args:
             _multiclass_calibration_error_tensor_validation(preds, target, self.num_classes, self.ignore_index)
         preds, target = _multiclass_confusion_matrix_format(
@@ -215,16 +294,59 @@ class MulticlassCalibrationError(Metric):
         self.accuracies.append(accuracies)
 
     def compute(self) -> Tensor:
+        """Compute metric."""
         confidences = dim_zero_cat(self.confidences)
         accuracies = dim_zero_cat(self.accuracies)
         return _ce_compute(confidences, accuracies, self.n_bins, norm=self.norm)
 
+    def plot(
+        self, val: Optional[Union[Tensor, Sequence[Tensor]]] = None, ax: Optional[_AX_TYPE] = None
+    ) -> _PLOT_OUT_TYPE:
+        """Plot a single or multiple values from the metric.
 
-class CalibrationError:
-    r"""`Computes the Top-label Calibration Error`_. The expected calibration error can be used to quantify how well
-    a given model is calibrated e.g. how well the predicted output probabilities of the model matches the actual
-    probabilities of the ground truth distribution.
+        Args:
+            val: Either a single result from calling `metric.forward` or `metric.compute` or a list of these results.
+                If no value is provided, will automatically call `metric.compute` and plot that result.
+            ax: An matplotlib axis object. If provided will add plot to that axis
 
+        Returns:
+            Figure object and Axes object
+
+        Raises:
+            ModuleNotFoundError:
+                If `matplotlib` is not installed
+
+        .. plot::
+            :scale: 75
+
+            >>> from torch import randn, randint
+            >>> # Example plotting a single value
+            >>> from torchmetrics.classification import MulticlassCalibrationError
+            >>> metric = MulticlassCalibrationError(num_classes=3, n_bins=3, norm='l1')
+            >>> metric.update(randn(20,3).softmax(dim=-1), randint(3, (20,)))
+            >>> fig_, ax_ = metric.plot()
+
+        .. plot::
+            :scale: 75
+
+            >>> from torch import randn, randint
+            >>> # Example plotting a multiple values
+            >>> from torchmetrics.classification import MulticlassCalibrationError
+            >>> metric = MulticlassCalibrationError(num_classes=3, n_bins=3, norm='l1')
+            >>> values = []
+            >>> for _ in range(20):
+            ...     values.append(metric(randn(20,3).softmax(dim=-1), randint(3, (20,))))
+            >>> fig_, ax_ = metric.plot(values)
+
+        """
+        return self._plot(val, ax)
+
+
+class CalibrationError(_ClassificationTaskWrapper):
+    r"""`Top-label Calibration Error`_.
+
+    The expected calibration error can be used to quantify how well a given model is calibrated e.g. how well the
+    predicted output probabilities of the model matches the actual probabilities of the ground truth distribution.
     Three different norms are implemented, each corresponding to variations on the calibration error metric.
 
     .. math::
@@ -242,13 +364,15 @@ class CalibrationError:
 
     This function is a simple wrapper to get the task specific versions of this metric, which is done by setting the
     ``task`` argument to either ``'binary'`` or ``'multiclass'``. See the documentation of
-    :mod:`BinaryCalibrationError` and :mod:`MulticlassCalibrationError` for the specific details of
-    each argument influence and examples.
+    :class:`~torchmetrics.classification.BinaryCalibrationError` and
+    :class:`~torchmetrics.classification.MulticlassCalibrationError` for the specific details of each argument influence
+    and examples.
+
     """
 
-    def __new__(
-        cls,
-        task: Literal["binary", "multiclass"] = None,
+    def __new__(  # type: ignore[misc]
+        cls: type["CalibrationError"],
+        task: Literal["binary", "multiclass"],
         n_bins: int = 15,
         norm: Literal["l1", "l2", "max"] = "l1",
         num_classes: Optional[int] = None,
@@ -256,12 +380,13 @@ class CalibrationError:
         validate_args: bool = True,
         **kwargs: Any,
     ) -> Metric:
-        kwargs.update(dict(n_bins=n_bins, norm=norm, ignore_index=ignore_index, validate_args=validate_args))
-        if task == "binary":
+        """Initialize task metric."""
+        task = ClassificationTaskNoMultilabel.from_str(task)
+        kwargs.update({"n_bins": n_bins, "norm": norm, "ignore_index": ignore_index, "validate_args": validate_args})
+        if task == ClassificationTaskNoMultilabel.BINARY:
             return BinaryCalibrationError(**kwargs)
-        if task == "multiclass":
-            assert isinstance(num_classes, int)
+        if task == ClassificationTaskNoMultilabel.MULTICLASS:
+            if not isinstance(num_classes, int):
+                raise ValueError(f"`num_classes` is expected to be `int` but `{type(num_classes)} was passed.`")
             return MulticlassCalibrationError(num_classes, **kwargs)
-        raise ValueError(
-            f"Expected argument `task` to either be `'binary'`, `'multiclass'` or `'multilabel'` but got {task}"
-        )
+        raise ValueError(f"Not handled value: {task}")
