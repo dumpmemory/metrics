@@ -1,4 +1,4 @@
-# Copyright The PyTorch Lightning team.
+# Copyright The Lightning team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -23,12 +23,13 @@ from torchmetrics.functional.pairwise.helpers import _check_input, _reduce_dista
 def _pairwise_euclidean_distance_update(
     x: Tensor, y: Optional[Tensor] = None, zero_diagonal: Optional[bool] = None
 ) -> Tensor:
-    """Calculates the pairwise euclidean distance matrix.
+    """Calculate the pairwise euclidean distance matrix.
 
     Args:
         x: tensor of shape ``[N,d]``
         y: tensor of shape ``[M,d]``
         zero_diagonal: determines if the diagonal of the distance matrix should be set to zero
+
     """
     x, y, zero_diagonal = _check_input(x, y, zero_diagonal)
     # upcast to float64 to prevent precision issues
@@ -49,7 +50,7 @@ def pairwise_euclidean_distance(
     reduction: Literal["mean", "sum", "none", None] = None,
     zero_diagonal: Optional[bool] = None,
 ) -> Tensor:
-    r"""Calculates pairwise euclidean distances:
+    r"""Calculate pairwise euclidean distances.
 
     .. math::
         d_{euc}(x,y) = ||x - y||_2 = \sqrt{\sum_{d=1}^D (x_d - y_d)^2}
@@ -71,7 +72,7 @@ def pairwise_euclidean_distance(
 
     Example:
         >>> import torch
-        >>> from torchmetrics.functional import pairwise_euclidean_distance
+        >>> from torchmetrics.functional.pairwise import pairwise_euclidean_distance
         >>> x = torch.tensor([[2, 3], [3, 5], [5, 8]], dtype=torch.float32)
         >>> y = torch.tensor([[1, 0], [2, 1]], dtype=torch.float32)
         >>> pairwise_euclidean_distance(x, y)
@@ -82,6 +83,7 @@ def pairwise_euclidean_distance(
         tensor([[0.0000, 2.2361, 5.8310],
                 [2.2361, 0.0000, 3.6056],
                 [5.8310, 3.6056, 0.0000]])
+
     """
     distance = _pairwise_euclidean_distance_update(x, y, zero_diagonal)
     return _reduce_distance_matrix(distance, reduction)
