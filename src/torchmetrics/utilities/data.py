@@ -1,4 +1,4 @@
-# Copyright The PyTorch Lightning team.
+# Copyright The Lightning team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,19 +11,25 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Union
+import sys
+from collections.abc import Sequence
+from typing import Any, List, Optional, Union
 
 import torch
+from lightning_utilities import apply_to_collection
 from torch import Tensor
 
-from torchmetrics.utilities.imports import _TORCH_GREATER_EQUAL_1_12
+from torchmetrics.utilities.exceptions import TorchMetricsUserWarning
+from torchmetrics.utilities.imports import _TORCH_LESS_THAN_2_6, _XLA_AVAILABLE
+from torchmetrics.utilities.prints import rank_zero_warn
 
 METRIC_EPS = 1e-6
 
 
 def dim_zero_cat(x: Union[Tensor, List[Tensor]]) -> Tensor:
     """Concatenation along the zero dimension."""
-    x = x if isinstance(x, (list, tuple)) else [x]
+    if isinstance(x, torch.Tensor):
+        return x
     x = [y.unsqueeze(0) if y.numel() == 1 and y.ndim == 0 else y for y in x]
     if not x:  # empty list
         raise ValueError("No samples to concatenate")
@@ -55,23 +61,28 @@ def _flatten(x: Sequence) -> list:
     return [item for sublist in x for item in sublist]
 
 
-def _flatten_dict(x: Dict) -> Dict:
-    """Flatten dict of dicts into single dict."""
+def _flatten_dict(x: dict) -> tuple[dict, bool]:
+    """Flatten dict of dicts into single dict and checking for duplicates in keys along the way."""
     new_dict = {}
+    duplicates = False
     for key, value in x.items():
         if isinstance(value, dict):
             for k, v in value.items():
+                if k in new_dict:
+                    duplicates = True
                 new_dict[k] = v
         else:
+            if key in new_dict:
+                duplicates = True
             new_dict[key] = value
-    return new_dict
+    return new_dict, duplicates
 
 
 def to_onehot(
     label_tensor: Tensor,
     num_classes: Optional[int] = None,
 ) -> Tensor:
-    """Converts a dense label tensor to one-hot format.
+    """Convert  a dense label tensor to one-hot format.
 
     Args:
         label_tensor: dense label tensor, with shape [N, d1, d2, ...]
@@ -86,6 +97,7 @@ def to_onehot(
         tensor([[0, 1, 0, 0],
                 [0, 0, 1, 0],
                 [0, 0, 0, 1]])
+
     """
     if num_classes is None:
         num_classes = int(label_tensor.max().detach().item() + 1)
@@ -99,6 +111,14 @@ def to_onehot(
     )
     index = label_tensor.long().unsqueeze(1).expand_as(tensor_onehot)
     return tensor_onehot.scatter_(1, index, 1.0)
+
+
+def _top_k_with_half_precision_support(x: Tensor, k: int = 1, dim: int = 1) -> Tensor:
+    """torch.top_k does not support half precision on CPU."""
+    if x.dtype == torch.half and not x.is_cuda:
+        idx = torch.argsort(x, dim=dim, stable=True).flip(dim)
+        return idx.narrow(dim, 0, k)
+    return x.topk(k=k, dim=dim).indices
 
 
 def select_topk(prob_tensor: Tensor, topk: int = 1, dim: int = 1) -> Tensor:
@@ -118,17 +138,18 @@ def select_topk(prob_tensor: Tensor, topk: int = 1, dim: int = 1) -> Tensor:
         >>> select_topk(x, topk=2)
         tensor([[0, 1, 1],
                 [1, 1, 0]], dtype=torch.int32)
+
     """
-    zeros = torch.zeros_like(prob_tensor)
+    topk_tensor = torch.zeros_like(prob_tensor, dtype=torch.int)
     if topk == 1:  # argmax has better performance than topk
-        topk_tensor = zeros.scatter(dim, prob_tensor.argmax(dim=dim, keepdim=True), 1.0)
+        topk_tensor.scatter_(dim, prob_tensor.argmax(dim=dim, keepdim=True), 1.0)
     else:
-        topk_tensor = zeros.scatter(dim, prob_tensor.topk(k=topk, dim=dim).indices, 1.0)
+        topk_tensor.scatter_(dim, _top_k_with_half_precision_support(prob_tensor, k=topk, dim=dim), 1.0)
     return topk_tensor.int()
 
 
 def to_categorical(x: Tensor, argmax_dim: int = 1) -> Tensor:
-    """Converts a tensor of probabilities to a dense label tensor.
+    """Convert  a tensor of probabilities to a dense label tensor.
 
     Args:
         x: probabilities to get the categorical label [N, d1, d2, ...]
@@ -141,58 +162,9 @@ def to_categorical(x: Tensor, argmax_dim: int = 1) -> Tensor:
         >>> x = torch.tensor([[0.2, 0.5], [0.9, 0.1]])
         >>> to_categorical(x)
         tensor([1, 0])
+
     """
     return torch.argmax(x, dim=argmax_dim)
-
-
-def apply_to_collection(
-    data: Any,
-    dtype: Union[type, tuple],
-    function: Callable,
-    *args: Any,
-    wrong_dtype: Optional[Union[type, tuple]] = None,
-    **kwargs: Any,
-) -> Any:
-    """Recursively applies a function to all elements of a certain dtype.
-
-    Args:
-        data: the collection to apply the function to
-        dtype: the given function will be applied to all elements of this dtype
-        function: the function to apply
-        *args: positional arguments (will be forwarded to call of ``function``)
-        wrong_dtype: the given function won't be applied if this type is specified and the given collections is of
-            the :attr:`wrong_type` even if it is of type :attr`dtype`
-        **kwargs: keyword arguments (will be forwarded to call of ``function``)
-
-    Returns:
-        the resulting collection
-
-    Example:
-        >>> apply_to_collection(torch.tensor([8, 0, 2, 6, 7]), dtype=Tensor, function=lambda x: x ** 2)
-        tensor([64,  0,  4, 36, 49])
-        >>> apply_to_collection([8, 0, 2, 6, 7], dtype=int, function=lambda x: x ** 2)
-        [64, 0, 4, 36, 49]
-        >>> apply_to_collection(dict(abc=123), dtype=int, function=lambda x: x ** 2)
-        {'abc': 15129}
-    """
-    elem_type = type(data)
-
-    # Breaking condition
-    if isinstance(data, dtype) and (wrong_dtype is None or not isinstance(data, wrong_dtype)):
-        return function(data, *args, **kwargs)
-
-    # Recursively apply to collection items
-    if isinstance(data, Mapping):
-        return elem_type({k: apply_to_collection(v, dtype, function, *args, **kwargs) for k, v in data.items()})
-
-    if isinstance(data, tuple) and hasattr(data, "_fields"):  # named tuple
-        return elem_type(*(apply_to_collection(d, dtype, function, *args, **kwargs) for d in data))
-
-    if isinstance(data, Sequence) and not isinstance(data, str):
-        return elem_type([apply_to_collection(d, dtype, function, *args, **kwargs) for d in data])
-
-    # data is neither of dtype, nor a collection
-    return data
 
 
 def _squeeze_scalar_element_tensor(x: Tensor) -> Tensor:
@@ -204,12 +176,12 @@ def _squeeze_if_scalar(data: Any) -> Any:
 
 
 def _bincount(x: Tensor, minlength: Optional[int] = None) -> Tensor:
-    """PyTorch currently does not support``torch.bincount`` for:
+    """Implement custom bincount.
 
-        - deterministic mode on GPU.
-        - MPS devices
-
-    This implementation fallback to a for-loop counting occurrences in that case.
+    PyTorch currently does not support ``torch.bincount`` when running in deterministic mode on GPU or when running
+    MPS devices or when running on XLA device. This implementation therefore falls back to using a combination of
+    `torch.arange` and `torch.eq` in these scenarios. A small performance hit can expected and higher memory consumption
+    as `[batch_size, mincount]` tensor needs to be initialized compared to native ``torch.bincount``.
 
     Args:
         x: tensor to count
@@ -217,15 +189,35 @@ def _bincount(x: Tensor, minlength: Optional[int] = None) -> Tensor:
 
     Returns:
         Number of occurrences for each unique element in x
+
+    Example:
+        >>> x = torch.tensor([0,0,0,1,1,2,2,2,2])
+        >>> _bincount(x, minlength=3)
+        tensor([3, 2, 4])
+
     """
     if minlength is None:
         minlength = len(torch.unique(x))
-    if torch.are_deterministic_algorithms_enabled() or _TORCH_GREATER_EQUAL_1_12 and x.is_mps:
-        output = torch.zeros(minlength, device=x.device, dtype=torch.long)
-        for i in range(minlength):
-            output[i] = (x == i).sum()
-        return output
+
+    if torch.are_deterministic_algorithms_enabled() or _XLA_AVAILABLE or x.is_mps:
+        mesh = torch.arange(minlength, device=x.device).repeat(len(x), 1)
+        return torch.eq(x.reshape(-1, 1), mesh).sum(dim=0)
+
     return torch.bincount(x, minlength=minlength)
+
+
+def _cumsum(x: Tensor, dim: Optional[int] = 0, dtype: Optional[torch.dtype] = None) -> Tensor:
+    """Implement custom cumulative summation for Torch versions which does not support it natively."""
+    is_cuda_fp_deterministic = torch.are_deterministic_algorithms_enabled() and x.is_cuda and x.is_floating_point()
+    if _TORCH_LESS_THAN_2_6 and is_cuda_fp_deterministic and sys.platform != "win32":
+        rank_zero_warn(
+            "You are trying to use a metric in deterministic mode on GPU that uses `torch.cumsum`, which is currently"
+            " not supported. The tensor will be copied to the CPU memory to compute it and then copied back to GPU."
+            " Expect some slowdowns.",
+            TorchMetricsUserWarning,
+        )
+        return x.cpu().cumsum(dim=dim, dtype=dtype).to(x.device)
+    return torch.cumsum(x, dim=dim, dtype=dtype)
 
 
 def _flexible_bincount(x: Tensor) -> Tensor:
@@ -236,19 +228,44 @@ def _flexible_bincount(x: Tensor) -> Tensor:
 
     Returns:
         Number of occurrences for each unique element in x
-    """
 
+    """
     # make sure elements in x start from 0
     x = x - x.min()
     unique_x = torch.unique(x)
 
-    output = _bincount(x, minlength=torch.max(unique_x) + 1)
+    output = _bincount(x, minlength=torch.max(unique_x) + 1)  # type: ignore[arg-type]
     # remove zeros from output tensor
     return output[unique_x]
 
 
 def allclose(tensor1: Tensor, tensor2: Tensor) -> bool:
-    """Wrapper of torch.allclose that is robust towards dtype difference."""
+    """Wrap torch.allclose to be robust towards dtype difference."""
     if tensor1.dtype != tensor2.dtype:
         tensor2 = tensor2.to(dtype=tensor1.dtype)
     return torch.allclose(tensor1, tensor2)
+
+
+def interp(x: Tensor, xp: Tensor, fp: Tensor) -> Tensor:
+    """Interpolation function comparable to numpy.interp.
+
+    Args:
+        x: x-coordinates where to evaluate the interpolated values
+        xp: x-coordinates of the data points
+        fp: y-coordinates of the data points
+
+    """
+    # Sort xp and fp based on xp for compatibility with np.interp
+    sorted_indices = torch.argsort(xp)
+    xp = xp[sorted_indices]
+    fp = fp[sorted_indices]
+
+    # Calculate slopes for each interval
+    slopes = (fp[1:] - fp[:-1]) / (xp[1:] - xp[:-1])
+
+    # Identify where x falls relative to xp
+    indices = torch.searchsorted(xp, x) - 1
+    indices = torch.clamp(indices, 0, len(slopes) - 1)
+
+    # Compute interpolated values
+    return fp[indices] + slopes[indices] * (x - xp[indices])

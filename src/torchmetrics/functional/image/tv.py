@@ -1,4 +1,4 @@
-# Copyright The PyTorch Lightning team.
+# Copyright The Lightning team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,14 +11,14 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Tuple
+from typing import Optional, Union
 
 from torch import Tensor
 from typing_extensions import Literal
 
 
-def _total_variation_update(img: Tensor) -> Tuple[Tensor, int]:
-    """Computes total variation statistics on current batch."""
+def _total_variation_update(img: Tensor) -> tuple[Tensor, int]:
+    """Compute total variation statistics on current batch."""
     if img.ndim != 4:
         raise RuntimeError(f"Expected input `img` to be an 4D tensor, but got {img.shape}")
     diff1 = img[..., 1:, :] - img[..., :-1, :]
@@ -31,21 +31,20 @@ def _total_variation_update(img: Tensor) -> Tuple[Tensor, int]:
 
 
 def _total_variation_compute(
-    score: Tensor, num_elements: int, reduction: Literal["mean", "sum", "none", None]
+    score: Tensor, num_elements: Union[int, Tensor], reduction: Optional[Literal["mean", "sum", "none"]]
 ) -> Tensor:
     """Compute final total variation score."""
     if reduction == "mean":
         return score.sum() / num_elements
-    elif reduction == "sum":
+    if reduction == "sum":
         return score.sum()
-    elif reduction is None or reduction == "none":
+    if reduction is None or reduction == "none":
         return score
-    else:
-        raise ValueError("Expected argument `reduction` to either be 'sum', 'mean', 'none' or None")
+    raise ValueError("Expected argument `reduction` to either be 'sum', 'mean', 'none' or None")
 
 
-def total_variation(img: Tensor, reduction: Literal["mean", "sum", "none", None] = "sum") -> Tensor:
-    """Computes total variation loss.
+def total_variation(img: Tensor, reduction: Optional[Literal["mean", "sum", "none"]] = "sum") -> Tensor:
+    """Compute total variation loss.
 
     Args:
         img: A `Tensor` of shape `(N, C, H, W)` consisting of images
@@ -65,12 +64,12 @@ def total_variation(img: Tensor, reduction: Literal["mean", "sum", "none", None]
             If ``img`` is not 4D tensor
 
     Example:
-        >>> import torch
-        >>> from torchmetrics.functional import total_variation
-        >>> _ = torch.manual_seed(42)
-        >>> img = torch.rand(5, 3, 28, 28)
+        >>> from torch import rand
+        >>> from torchmetrics.functional.image import total_variation
+        >>> img = rand(5, 3, 28, 28)
         >>> total_variation(img)
         tensor(7546.8018)
+
     """
     # code adapted from:
     # from kornia.losses import total_variation as kornia_total_variation
