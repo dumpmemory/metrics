@@ -1,4 +1,4 @@
-# Copyright The PyTorch Lightning team.
+# Copyright The Lightning team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,10 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 import math
-import warnings
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 from torch import Tensor
@@ -22,15 +20,9 @@ from torch import Tensor
 # import or def the norm/solve function
 from torch.linalg import norm
 
+from torchmetrics.utilities import rank_zero_warn
 from torchmetrics.utilities.checks import _check_same_shape
 from torchmetrics.utilities.imports import _FAST_BSS_EVAL_AVAILABLE
-
-solve = torch.linalg.solve
-
-if _FAST_BSS_EVAL_AVAILABLE:
-    from fast_bss_eval.torch.cgd import toeplitz_conjugate_gradient
-else:
-    toeplitz_conjugate_gradient = None
 
 
 def _symmetric_toeplitz(vector: Tensor) -> Tensor:
@@ -40,9 +32,9 @@ def _symmetric_toeplitz(vector: Tensor) -> Tensor:
         vector: shape [..., L]
 
     Example:
+        >>> from torch import tensor
         >>> from torchmetrics.functional.audio.sdr import _symmetric_toeplitz
-        >>> import torch
-        >>> v = torch.tensor([0, 1, 2, 3, 4])
+        >>> v = tensor([0, 1, 2, 3, 4])
         >>> _symmetric_toeplitz(v)
         tensor([[0, 1, 2, 3, 4],
                 [1, 0, 1, 2, 3],
@@ -52,6 +44,7 @@ def _symmetric_toeplitz(vector: Tensor) -> Tensor:
 
     Returns:
         a symmetric Toeplitz matrix of shape [..., L, L]
+
     """
     vec_exp = torch.cat([torch.flip(vector, dims=(-1,)), vector[..., 1:]], dim=-1)
     v_len = vector.shape[-1]
@@ -60,11 +53,12 @@ def _symmetric_toeplitz(vector: Tensor) -> Tensor:
     ).flip(dims=(-1,))
 
 
-def _compute_autocorr_crosscorr(target: Tensor, preds: Tensor, corr_len: int) -> Tuple[Tensor, Tensor]:
-    r"""Compute the auto correlation of `target` and the cross correlation of `target` and `preds` using the fast
-    Fourier transform (FFT). Let's denotes the symmetric Toeplitz matric of the auto correlation of `target` as
-    `R`, the cross correlation as 'b', then solving the equation `Rh=b` could have `h` as the coordinate of `preds`
-    in the column space of the `corr_len` shifts of `target`.
+def _compute_autocorr_crosscorr(target: Tensor, preds: Tensor, corr_len: int) -> tuple[Tensor, Tensor]:
+    r"""Compute the auto correlation of `target` and the cross correlation of `target` and `preds`.
+
+    This calculation is done using the fast Fourier transform (FFT). Let's denotes the symmetric Toeplitz metric of the
+    auto correlation of `target` as `R`, the cross correlation as 'b', then solving the equation `Rh=b` could have `h`
+    as the coordinate of `preds` in the column space of the `corr_len` shifts of `target`.
 
     Args:
         target: the target (reference) signal of shape [..., time]
@@ -74,12 +68,13 @@ def _compute_autocorr_crosscorr(target: Tensor, preds: Tensor, corr_len: int) ->
     Returns:
         the auto correlation of `target` of shape [..., corr_len]
         the cross correlation of `target` and `preds` of shape [..., corr_len]
+
     """
     # the valid length for the signal after convolution
     n_fft = 2 ** math.ceil(math.log2(preds.shape[-1] + target.shape[-1] - 1))
 
     # computes the auto correlation of `target`
-    # r_0 is the first row of the symmetric Toeplitz matric
+    # r_0 is the first row of the symmetric Toeplitz metric
     t_fft = torch.fft.rfft(target, n=n_fft, dim=-1)
     r_0 = torch.fft.irfft(t_fft.real**2 + t_fft.imag**2, n=n_fft)[..., :corr_len]
 
@@ -98,8 +93,7 @@ def signal_distortion_ratio(
     zero_mean: bool = False,
     load_diag: Optional[float] = None,
 ) -> Tensor:
-    r"""Calculates Signal to Distortion Ratio (SDR) metric. See `SDR ref1`_ and `SDR ref2`_ for details on the
-    metric.
+    r"""Calculate Signal to Distortion Ratio (SDR) metric. See `SDR ref1`_ and `SDR ref2`_ for details on the metric.
 
     .. note:
         The metric currently does not seem to work with Pytorch v1.11 and specific GPU hardware.
@@ -130,25 +124,25 @@ def signal_distortion_ratio(
             If ``preds`` and ``target`` does not have the same shape
 
     Example:
+        >>> from torch import randn
         >>> from torchmetrics.functional.audio import signal_distortion_ratio
-        >>> import torch
-        >>> g = torch.manual_seed(1)
-        >>> preds = torch.randn(8000)
-        >>> target = torch.randn(8000)
+        >>> preds = randn(8000)
+        >>> target = randn(8000)
         >>> signal_distortion_ratio(preds, target)
-        tensor(-12.0589)
+        tensor(-11.9930)
         >>> # use with permutation_invariant_training
         >>> from torchmetrics.functional.audio import permutation_invariant_training
-        >>> preds = torch.randn(4, 2, 8000)  # [batch, spk, time]
-        >>> target = torch.randn(4, 2, 8000)
-        >>> best_metric, best_perm = permutation_invariant_training(preds, target, signal_distortion_ratio, 'max')
+        >>> preds = randn(4, 2, 8000)  # [batch, spk, time]
+        >>> target = randn(4, 2, 8000)
+        >>> best_metric, best_perm = permutation_invariant_training(preds, target, signal_distortion_ratio)
         >>> best_metric
-        tensor([-11.6375, -11.4358, -11.7148, -11.6325])
+        tensor([-11.7748, -11.7948, -11.7160, -11.6254])
         >>> best_perm
         tensor([[1, 0],
-                [0, 1],
+                [1, 0],
                 [1, 0],
                 [0, 1]])
+
     """
     _check_same_shape(preds, target)
 
@@ -174,21 +168,22 @@ def signal_distortion_ratio(
         r_0[..., 0] += load_diag
 
     if use_cg_iter is not None and _FAST_BSS_EVAL_AVAILABLE:
+        from fast_bss_eval.torch.cgd import toeplitz_conjugate_gradient
+
         # use preconditioned conjugate gradient
         sol = toeplitz_conjugate_gradient(r_0, b, n_iter=use_cg_iter)
     else:
-        if use_cg_iter is not None:
-            if not _FAST_BSS_EVAL_AVAILABLE:
-                warnings.warn(
-                    "The `use_cg_iter` parameter of `SDR` requires that `fast-bss-eval` is installed. "
-                    "To make this this warning disappear, you could install `fast-bss-eval` using "
-                    "`pip install fast-bss-eval` or set `use_cg_iter=None`. For this time, the solver "
-                    "provided by Pytorch is used.",
-                    UserWarning,
-                )
+        if use_cg_iter is not None and not _FAST_BSS_EVAL_AVAILABLE:
+            rank_zero_warn(
+                "The `use_cg_iter` parameter of `SDR` requires that `fast-bss-eval` is installed. "
+                "To make this this warning disappear, you could install `fast-bss-eval` using "
+                "`pip install fast-bss-eval` or set `use_cg_iter=None`. For this time, the solver "
+                "provided by Pytorch is used.",
+                UserWarning,
+            )
         # regular matrix solver
         r = _symmetric_toeplitz(r_0)  # the auto-correlation of the L shifts of `target`
-        sol = solve(r, b)
+        sol = torch.linalg.solve(r, b)
 
     # compute the coherence
     coh = torch.einsum("...l,...l->...", b, sol)
@@ -199,13 +194,13 @@ def signal_distortion_ratio(
 
     if preds_dtype == torch.float64:
         return val
-    else:
-        return val.float()
+    return val.float()
 
 
 def scale_invariant_signal_distortion_ratio(preds: Tensor, target: Tensor, zero_mean: bool = False) -> Tensor:
-    """`Scale-invariant signal-to-distortion ratio`_ (SI-SDR). The SI-SDR value is in general considered an overall
-    measure of how good a source sound.
+    """`Scale-invariant signal-to-distortion ratio`_ (SI-SDR).
+
+    The SI-SDR value is in general considered an overall measure of how good a source sound.
 
     Args:
         preds: float tensor with shape ``(...,time)``
@@ -225,6 +220,7 @@ def scale_invariant_signal_distortion_ratio(preds: Tensor, target: Tensor, zero_
         >>> preds = torch.tensor([2.5, 0.0, 2.0, 8.0])
         >>> scale_invariant_signal_distortion_ratio(preds, target)
         tensor(18.4030)
+
     """
     _check_same_shape(preds, target)
     eps = torch.finfo(preds.dtype).eps
@@ -233,14 +229,75 @@ def scale_invariant_signal_distortion_ratio(preds: Tensor, target: Tensor, zero_
         target = target - torch.mean(target, dim=-1, keepdim=True)
         preds = preds - torch.mean(preds, dim=-1, keepdim=True)
 
-    alpha = (torch.sum(preds * target, dim=-1, keepdim=True) + eps) / (
-        torch.sum(target**2, dim=-1, keepdim=True) + eps
-    )
+    alpha = (torch.sum(preds * target, dim=-1, keepdim=True) + eps) / (torch.sum(target**2, dim=-1, keepdim=True) + eps)
     target_scaled = alpha * target
 
     noise = target_scaled - preds
 
     val = (torch.sum(target_scaled**2, dim=-1) + eps) / (torch.sum(noise**2, dim=-1) + eps)
-    val = 10 * torch.log10(val)
+    return 10 * torch.log10(val)
 
-    return val
+
+def source_aggregated_signal_distortion_ratio(
+    preds: Tensor,
+    target: Tensor,
+    scale_invariant: bool = True,
+    zero_mean: bool = False,
+) -> Tensor:
+    """`Source-aggregated signal-to-distortion ratio`_ (SA-SDR).
+
+    The SA-SDR is proposed to provide a stable gradient for meeting style source separation, where
+    one-speaker and multiple-speaker scenes coexist.
+
+    Args:
+        preds: float tensor with shape ``(..., spk, time)``
+        target: float tensor with shape ``(..., spk, time)``
+        scale_invariant: if True, scale the targets of different speakers with the same alpha
+        zero_mean: If to zero mean target and preds or not
+
+    Returns:
+        SA-SDR with shape ``(...)``
+
+    Example:
+        >>> from torch import randn
+        >>> from torchmetrics.functional.audio import source_aggregated_signal_distortion_ratio
+        >>> preds = randn(2, 8000)  # [..., spk, time]
+        >>> target = randn(2, 8000)
+        >>> source_aggregated_signal_distortion_ratio(preds, target)
+        tensor(-50.8171)
+        >>> # use with permutation_invariant_training
+        >>> from torchmetrics.functional.audio import permutation_invariant_training
+        >>> preds = randn(4, 2, 8000)  # [batch, spk, time]
+        >>> target = randn(4, 2, 8000)
+        >>> best_metric, best_perm = permutation_invariant_training(preds, target,
+        ...     source_aggregated_signal_distortion_ratio, mode="permutation-wise")
+        >>> best_metric
+        tensor([-42.6290, -44.3500, -34.7503, -54.1828])
+        >>> best_perm
+        tensor([[0, 1],
+                [1, 0],
+                [0, 1],
+                [1, 0]])
+
+    """
+    _check_same_shape(preds, target)
+    if preds.ndim < 2:
+        raise RuntimeError(f"The preds and target should have the shape (..., spk, time), but {preds.shape} found")
+
+    eps = torch.finfo(preds.dtype).eps
+
+    if zero_mean:
+        target = target - torch.mean(target, dim=-1, keepdim=True)
+        preds = preds - torch.mean(preds, dim=-1, keepdim=True)
+
+    if scale_invariant:
+        # scale the targets of different speakers with the same alpha (shape [..., 1, 1])
+        alpha = ((preds * target).sum(dim=-1, keepdim=True).sum(dim=-2, keepdim=True) + eps) / (
+            (target**2).sum(dim=-1, keepdim=True).sum(dim=-2, keepdim=True) + eps
+        )
+        target = alpha * target
+
+    distortion = target - preds
+
+    val = ((target**2).sum(dim=-1).sum(dim=-1) + eps) / ((distortion**2).sum(dim=-1).sum(dim=-1) + eps)
+    return 10 * torch.log10(val)

@@ -1,4 +1,4 @@
-# Copyright The PyTorch Lightning team.
+# Copyright The Lightning team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import itertools
-from typing import Optional, Union
+from typing import Optional
 
 import torch
 from torch import Tensor
@@ -34,19 +34,20 @@ def _tschuprows_t_update(
     target: Tensor,
     num_classes: int,
     nan_strategy: Literal["replace", "drop"] = "replace",
-    nan_replace_value: Optional[Union[int, float]] = 0.0,
+    nan_replace_value: Optional[float] = 0.0,
 ) -> Tensor:
-    """Computes the bins to update the confusion matrix with for Tschuprow's T calculation.
+    """Compute the bins to update the confusion matrix with for Tschuprow's T calculation.
 
     Args:
         preds: 1D or 2D tensor of categorical (nominal) data
         target: 1D or 2D tensor of categorical (nominal) data
-        num_classes: Integer specifing the number of classes
+        num_classes: Integer specifying the number of classes
         nan_strategy: Indication of whether to replace or drop ``NaN`` values
         nan_replace_value: Value to replace ``NaN`s when ``nan_strategy = 'replace```
 
     Returns:
         Non-reduced confusion matrix
+
     """
     preds = preds.argmax(1) if preds.ndim == 2 else preds
     target = target.argmax(1) if target.ndim == 2 else target
@@ -63,24 +64,25 @@ def _tschuprows_t_compute(confmat: Tensor, bias_correction: bool) -> Tensor:
 
     Returns:
         Tschuprow's T statistic
+
     """
     confmat = _drop_empty_rows_and_cols(confmat)
     cm_sum = confmat.sum()
     chi_squared = _compute_chi_squared(confmat, bias_correction)
     phi_squared = chi_squared / cm_sum
-    n_rows, n_cols = confmat.shape
+    num_rows, num_cols = confmat.shape
 
     if bias_correction:
         phi_squared_corrected, rows_corrected, cols_corrected = _compute_bias_corrected_values(
-            phi_squared, n_rows, n_cols, cm_sum
+            phi_squared, num_rows, num_cols, cm_sum
         )
         if torch.min(rows_corrected, cols_corrected) == 1:
             _unable_to_use_bias_correction_warning(metric_name="Tschuprow's T")
             return torch.tensor(float("nan"), device=confmat.device)
         tschuprows_t_value = torch.sqrt(phi_squared_corrected / torch.sqrt((rows_corrected - 1) * (cols_corrected - 1)))
     else:
-        n_rows_tensor = torch.tensor(n_rows, device=phi_squared.device)
-        n_cols_tensor = torch.tensor(n_cols, device=phi_squared.device)
+        n_rows_tensor = torch.tensor(num_rows, device=phi_squared.device)
+        n_cols_tensor = torch.tensor(num_cols, device=phi_squared.device)
         tschuprows_t_value = torch.sqrt(phi_squared / torch.sqrt((n_rows_tensor - 1) * (n_cols_tensor - 1)))
     return tschuprows_t_value.clamp(0.0, 1.0)
 
@@ -90,7 +92,7 @@ def tschuprows_t(
     target: Tensor,
     bias_correction: bool = True,
     nan_strategy: Literal["replace", "drop"] = "replace",
-    nan_replace_value: Optional[Union[int, float]] = 0.0,
+    nan_replace_value: Optional[float] = 0.0,
 ) -> Tensor:
     r"""Compute `Tschuprow's T`_ statistic measuring the association between two categorical (nominal) data series.
 
@@ -128,12 +130,13 @@ def tschuprows_t(
         Tschuprow's T statistic
 
     Example:
-        >>> from torchmetrics.functional import tschuprows_t
-        >>> _ = torch.manual_seed(42)
-        >>> preds = torch.randint(0, 4, (100,))
-        >>> target = torch.round(preds + torch.randn(100)).clamp(0, 4)
+        >>> from torch import randint, round
+        >>> from torchmetrics.functional.nominal import tschuprows_t
+        >>> preds = randint(0, 4, (100,))
+        >>> target = round(preds + torch.randn(100)).clamp(0, 4)
         >>> tschuprows_t(preds, target)
         tensor(0.4930)
+
     """
     _nominal_input_validation(nan_strategy, nan_replace_value)
     num_classes = len(torch.cat([preds, target]).unique())
@@ -145,7 +148,7 @@ def tschuprows_t_matrix(
     matrix: Tensor,
     bias_correction: bool = True,
     nan_strategy: Literal["replace", "drop"] = "replace",
-    nan_replace_value: Optional[Union[int, float]] = 0.0,
+    nan_replace_value: Optional[float] = 0.0,
 ) -> Tensor:
     r"""Compute `Tschuprow's T`_ statistic between a set of multiple variables.
 
@@ -166,15 +169,16 @@ def tschuprows_t_matrix(
         Tschuprow's T statistic for a dataset of categorical variables
 
     Example:
+        >>> from torch import randint
         >>> from torchmetrics.functional.nominal import tschuprows_t_matrix
-        >>> _ = torch.manual_seed(42)
-        >>> matrix = torch.randint(0, 4, (200, 5))
+        >>> matrix = randint(0, 4, (200, 5))
         >>> tschuprows_t_matrix(matrix)
         tensor([[1.0000, 0.0637, 0.0000, 0.0542, 0.1337],
                 [0.0637, 1.0000, 0.0000, 0.0000, 0.0000],
                 [0.0000, 0.0000, 1.0000, 0.0000, 0.0649],
                 [0.0542, 0.0000, 0.0000, 1.0000, 0.1100],
                 [0.1337, 0.0000, 0.0649, 0.1100, 1.0000]])
+
     """
     _nominal_input_validation(nan_strategy, nan_replace_value)
     num_variables = matrix.shape[1]
